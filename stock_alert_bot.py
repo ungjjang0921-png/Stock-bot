@@ -34,6 +34,7 @@ from datetime import time as dtime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 import requests
 import yfinance as yf
@@ -86,7 +87,9 @@ SURGE_TOP = 8
 CHECK_EVERY_SEC = 60                 # PC 모드 주기
 RUN_ONCE = os.getenv("RUN_ONCE") == "1"
 TASK = os.getenv("TASK", "").strip().lower()
-STATE_FILE = Path(__file__).with_name("state.json")
+REPO_STATE = Path(__file__).with_name("state.json")
+STATE_FILE = Path(os.getenv("STATE_PATH") or REPO_STATE)   # 서버: 영구 저장소 경로
+NEWS_EVERY_SEC = 300                 # 실시간 모드에서 뉴스 확인 간격
 ET = ZoneInfo("America/New_York")
 KST = ZoneInfo("Asia/Seoul")
 # ═══════════════════════════════════════════════
@@ -104,8 +107,9 @@ def load_state() -> dict:
     base = {"chat_id": "", "tickers": list(DEFAULT_TICKERS), "last_alert": {},
             "news_seen": [], "done": {}, "update_offset": 0}
     try:
-        if STATE_FILE.exists():
-            base.update(json.loads(STATE_FILE.read_text(encoding="utf-8")))
+        src = STATE_FILE if STATE_FILE.exists() else REPO_STATE   # 서버 첫 실행 시 저장소 기록 이어받기
+        if src.exists():
+            base.update(json.loads(src.read_text(encoding="utf-8")))
     except Exception as e:
         log.warning("state.json 읽기 실패: %s", e)
     return base
@@ -114,6 +118,7 @@ def load_state() -> dict:
 def save_state() -> None:
     try:
         STATE["news_seen"] = STATE["news_seen"][-500:]
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATE_FILE.write_text(json.dumps(STATE, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as e:
         log.error("state.json 저장 실패: %s", e)
@@ -136,7 +141,7 @@ def tg(method: str, **params) -> dict | None:
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{method}"
     for attempt in range(1, 4):
         try:
-            r = http.post(url, data=params, timeout=15)
+            r = http.post(url, data=params, timeout=15 + int(params.get("timeout", 0)))
             data = r.json()
             if data.get("ok"):
                 return data
@@ -179,14 +184,14 @@ HELP = ("🤖 <b>사용법</b>\n"
         "/list — 목록\n"
         "/scan — 매집 스캔 지금 실행\n"
         "/jongbae — 종배 후보 지금 실행\n"
-        "※ 명령은 5분 안에 반영돼요 (한국시간 오후 5시~새벽 6시)")
+        + ("※ 명령은 5분 안에 반영돼요" if RUN_ONCE else "※ 실시간 서버 — 명령 즉시 반영"))
 
 
-def process_updates() -> set[str]:
+def process_updates(poll: int = 0) -> set[str]:
     """봇에게 온 명령 처리. 즉시 실행할 작업 목록 반환"""
     global TELEGRAM_CHAT_ID
     forced: set[str] = set()
-    data = tg("getUpdates", offset=STATE.get("update_offset", 0), timeout=0)
+    data = tg("getUpdates", offset=STATE.get("update_offset", 0), timeout=poll)
     if not data:
         return forced
     for upd in data["result"]:
@@ -226,7 +231,17 @@ def process_updates() -> set[str]:
 
 
 # ───────────────── 장 시간 / 휴장 ─────────────────
+_hours_cache: dict = {}
+
+
 def market_hours(day: date) -> tuple[datetime, datetime] | None:
+    if day not in _hours_cache:
+        _hours_cache.clear()
+        _hours_cache[day] = _market_hours(day)
+    return _hours_cache[day]
+
+
+def _market_hours(day: date) -> tuple[datetime, datetime] | None:
     """해당 날짜의 정규장 (개장, 마감). 휴장이면 None. 조기폐장 자동 반영"""
     try:
         import pandas_market_calendars as mcal
@@ -711,10 +726,38 @@ def dump_check(t: str, chg: float, price: float = 0) -> tuple[bool, list[str], l
         green = float(v.iloc[-15:][c.iloc[-15:] > o.iloc[-15:]].sum())
         dd = (hi - last) / hi * 100 if hi else 0
 
+        info["from_high"] = dd
         if dd > 25:
             bad.append(f"고점대비-{dd:.0f}%"); hard = True
-        elif last >= hi * 0.92:
-            good.append("고점근접")
+
+        # ── 고점 알림 방지 (설거지 구간 차단) ──
+        peak_i = int(np.argmax(h.values))
+        since_peak = len(bars) - 1 - peak_i                 # 고점 이후 몇 분 지났나
+        lo_day = float(bars["Low"].min())
+        run_pct = (hi / lo_day - 1) * 100 if lo_day else 0  # 오늘 저점→고점 상승폭
+        pk_vol = float(v.iloc[max(peak_i - 5, 0):peak_i + 5].mean() or 1)
+        now_vol = float(v.iloc[-5:].mean())
+        info["since_peak"] = since_peak
+
+        if since_peak >= 5 and dd >= 3:
+            # 고점 찍고 5분 넘게 신고가 못 냄 → 꺾이는 중
+            bad.append(f"고점후{since_peak}분·-{dd:.0f}%"); hard = True
+        elif since_peak <= 2:
+            good.append("신고가 갱신중")
+        if now_vol < pk_vol * 0.4 and since_peak >= 3:
+            bad.append("거래량 급감"); hard = True
+        if last > vwap * 1.25:
+            bad.append("VWAP+25% 과열"); hard = True
+        if run_pct > 80:
+            bad.append(f"저점대비+{run_pct:.0f}% 과열"); hard = True
+
+        # 데이터가 오래됐으면 (지연) 알리지 않음
+        try:
+            age = (datetime.now(timezone.utc) - bars.index[-1].to_pydatetime().astimezone(timezone.utc)).total_seconds() / 60
+            if age > 6:
+                bad.append(f"시세 {age:.0f}분 지연"); hard = True
+        except Exception:
+            pass
         if last < vwap:
             bad.append("VWAP이탈")
             if red > green * 1.5:
@@ -746,6 +789,8 @@ def dump_check(t: str, chg: float, price: float = 0) -> tuple[bool, list[str], l
                 above = d["High"][d["High"] > price * 1.03]
                 if len(above):
                     info["resist"] = (float(above.min()) / price - 1) * 100
+                    if info["resist"] < 15:          # 위로 남은 공간이 없으면 제외
+                        bad.append(f"저항 +{info['resist']:.0f}% 근접"); hard = True
     except Exception:
         pass
 
@@ -881,10 +926,15 @@ def run_surge(sess: str) -> None:
 
 
 # ───────────────── 실행 ─────────────────
-def run_once() -> None:
-    global TELEGRAM_CHAT_ID
+_last_news = 0.0
+
+
+def run_once(forced: set[str] | None = None, poll: bool = True) -> None:
+    global TELEGRAM_CHAT_ID, _last_news
     TELEGRAM_CHAT_ID = TELEGRAM_CHAT_ID or STATE.get("chat_id", "")
-    forced = process_updates()
+    forced = set(forced or ())
+    if poll:
+        forced |= process_updates()
     if TASK in ("scan", "jongbae"):
         forced.add(TASK)
     if not TELEGRAM_CHAT_ID:
@@ -914,10 +964,12 @@ def run_once() -> None:
         evaluate_surge_log()
     except Exception as e:
         log.exception("적중률 집계 오류: %s", e)
-    try:
-        check_news()
-    except Exception as e:
-        log.exception("뉴스 오류: %s", e)
+    if RUN_ONCE or time.time() - _last_news >= NEWS_EVERY_SEC:
+        _last_news = time.time()
+        try:
+            check_news()
+        except Exception as e:
+            log.exception("뉴스 오류: %s", e)
 
     if sess:
         check_realtime(sess)
@@ -962,15 +1014,26 @@ def main() -> None:
         finally:
             save_state()
         return
-    log.info("PC 모드 시작")
+    log.info("실시간 모드 시작 (%s초 주기)", CHECK_EVERY_SEC)
+    global TELEGRAM_CHAT_ID
+    TELEGRAM_CHAT_ID = TELEGRAM_CHAT_ID or STATE.get("chat_id", "")
+    send("⚡ <b>실시간 서버 가동</b>\n1분마다 감시 · 명령 즉시 응답")
+    last = 0.0
     while True:
         try:
-            run_once()
+            if time.time() - last >= CHECK_EVERY_SEC:
+                last = time.time()
+                run_once(poll=False)
+                save_state()
+            # 다음 주기까지 텔레그램 명령을 기다림 (오면 즉시 처리)
+            wait = int(max(1, min(50, CHECK_EVERY_SEC - (time.time() - last))))
+            forced = process_updates(poll=wait)
+            if forced:
+                run_once(forced, poll=False)
+            save_state()
         except Exception as e:
             log.exception("루프 오류 (계속 실행): %s", e)
-        finally:
-            save_state()
-        time.sleep(CHECK_EVERY_SEC - datetime.now().second % CHECK_EVERY_SEC)
+            time.sleep(5)
 
 
 if __name__ == "__main__":
