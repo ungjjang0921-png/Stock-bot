@@ -17,7 +17,8 @@
       "SPHL",
       "SHFS",
       "OLOX",
-      "SHMD"
+      "SHMD",
+      "INVE"
     ]
   },
   "surge_log": [
@@ -35,6 +36,14 @@
       "at": "2026-10-21T10:48:14.333547+00:00",
       "price": 0.8359,
       "score": 51,
+      "max_gain": null
+    },
+    {
+      "t": "INVE",
+      "date": "2026-10-21",
+      "at": "2026-10-21T11:33:05.431457+00:00",
+      "price": 2.629,
+      "score": 63,
       "max_gain": null
     }
   ]
