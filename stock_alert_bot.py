@@ -690,9 +690,10 @@ DUMP_NEWS = ["offering", "registered direct", "private placement", "warrant", "a
              "reverse split", "reverse stock split", "dilution", "shelf", "delist", "going concern"]
 
 
-def dump_check(t: str, chg: float) -> tuple[bool, list[str], list[str]]:
-    """설거지 위험 판정 → (통과여부, 좋은 신호, 위험 신호)"""
+def dump_check(t: str, chg: float, price: float = 0) -> tuple[bool, list[str], list[str], dict]:
+    """설거지 위험 판정 → (통과여부, 좋은 신호, 위험 신호, 추가정보)"""
     good, bad = [], []
+    info: dict = {"resist": None}
     hard = False
     try:
         bars = yf.Ticker(t).history(period="1d", interval="1m", prepost=True)
@@ -740,6 +741,11 @@ def dump_check(t: str, chg: float) -> tuple[bool, list[str], list[str]]:
             pumps = ((d["High"] / d["Open"] - 1 >= 0.5) & (d["Close"] / d["Open"] - 1 <= 0.1)).sum()
             if pumps >= 2:
                 bad.append(f"설거지이력{pumps}회"); hard = True
+            # 다음 저항선: 과거 3개월 고점 중 현재가 +3% 위에서 가장 가까운 것
+            if price:
+                above = d["High"][d["High"] > price * 1.03]
+                if len(above):
+                    info["resist"] = (float(above.min()) / price - 1) * 100
     except Exception:
         pass
 
@@ -752,7 +758,59 @@ def dump_check(t: str, chg: float) -> tuple[bool, list[str], list[str]]:
     elif any(sentiment(n["title"]) == "호재" for n in news):
         good.append("호재뉴스")
 
-    return (not hard and len(good) >= 2), good, bad
+    return (not hard and len(good) >= 2), good, bad, info
+
+
+# ── 급등 점수 & 실제 적중률 기록 ──
+HIT_GAIN = 20.0          # 알림 후 +20% 이상 가면 '적중'
+MIN_SAMPLES = 10         # 이 건수 이상 쌓여야 적중률 표시
+
+
+def surge_score(r: dict, good: list[str], bad: list[str]) -> int:
+    s = min(r.get("rel", 0), 5) / 5 * 25                 # 거래량 폭발 (25)
+    s += 10 * len(good)                                   # 차트 구조·호재 (최대 50)
+    f = r.get("float")
+    if f:
+        s += 15 if f < 10e6 else 8 if f < 30e6 else 0     # 유통주식 적을수록 (15)
+    s += 10 if r["chg"] <= 60 else 5 if r["chg"] <= 120 else 0  # 초반일수록 (10)
+    s -= 10 * len(bad)
+    return int(max(0, min(100, round(s))))
+
+
+def score_band(score: int) -> str:
+    return "80+" if score >= 80 else "60-79" if score >= 60 else "40-59" if score >= 40 else "0-39"
+
+
+def band_stats(band: str) -> str:
+    done = [e for e in STATE.get("surge_log", [])
+            if e.get("max_gain") is not None and score_band(e["score"]) == band]
+    if len(done) < MIN_SAMPLES:
+        return f"적중률 집계중({len(done)}/{MIN_SAMPLES})"
+    hit = sum(e["max_gain"] >= HIT_GAIN for e in done) / len(done) * 100
+    avg = sum(e["max_gain"] for e in done) / len(done)
+    return f"적중률 {hit:.0f}%({len(done)}건)·평균최고 +{avg:.0f}%"
+
+
+def evaluate_surge_log() -> None:
+    """지난 알림이 실제로 몇 %까지 올랐는지 기록 (1분봉은 7일치만 제공)"""
+    log_ = STATE.setdefault("surge_log", [])
+    today = datetime.now(ET).date().isoformat()
+    for e in log_:
+        if e.get("max_gain") is not None or e.get("checked") or e["date"] >= today:
+            continue
+        try:
+            bars = yf.Ticker(e["t"]).history(period="7d", interval="1m", prepost=True)
+            bars.index = bars.index.tz_convert(ET)
+            at = datetime.fromisoformat(e["at"]).astimezone(ET)
+            after = bars[(bars.index >= at) & (bars.index.date == at.date())]
+            if len(after):
+                e["max_gain"] = round((float(after["High"].max()) / e["price"] - 1) * 100, 1)
+            else:
+                e["checked"] = True
+        except Exception as ex:
+            log.warning("%s 결과 집계 실패: %s", e["t"], ex)
+            e["checked"] = True
+    STATE["surge_log"] = log_[-1000:]
 
 
 def run_surge(sess: str) -> None:
@@ -781,8 +839,10 @@ def run_surge(sess: str) -> None:
 
     passed, dumped = [], []
     for r in cands[:15]:
-        ok, good, bad = dump_check(r["t"], r["chg"])
+        ok, good, bad, info = dump_check(r["t"], r["chg"], r["price"])
         if ok:
+            r["resist"] = info["resist"]
+            r["score"] = surge_score(r, good, bad)
             passed.append((r, good, bad))
         else:
             dumped.append(r["t"])
@@ -795,20 +855,26 @@ def run_surge(sess: str) -> None:
     def vol_s(x):
         return f"{x / 1e6:.1f}M" if x >= 1e6 else f"{x / 1e3:.0f}K"
 
-    tbl = []
+    passed.sort(key=lambda x: x[0]["score"], reverse=True)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    tbl, why = [], []
     for r, good, bad in passed:
-        risk = "높음" if len(bad) >= 2 else "중간" if bad or r["price"] < 1 else "낮음"
         p = f"{r['price']:.3f}" if r["price"] < 1 else f"{r['price']:.2f}"
-        tbl.append([r["t"], p, f"+{r['chg']:.0f}%", vol_s(r["vol"]), risk])
-    why = "\n".join(f"• <b>{r['t']}</b> {'·'.join(g)}"
-                    + (f" ⚠️{'·'.join(b)}" if b else "")
-                    + (f" (유통 {r['float'] / 1e6:.1f}M주)" if r.get("float") else "")
-                    for r, g, b in passed)
+        res = f"+{r['resist']:.0f}%" if r["resist"] else "신고가"
+        tbl.append([r["t"], p, f"+{r['chg']:.0f}%", str(r["score"]), res])
+        why.append(f"• <b>{r['t']} {r['score']}점</b> {band_stats(score_band(r['score']))}\n  "
+                   + "·".join(good) + (f" ⚠️{'·'.join(bad)}" if bad else "")
+                   + f" · 거래량 {vol_s(r['vol'])}"
+                   + (f" · 유통 {r['float'] / 1e6:.1f}M" if r.get("float") else ""))
+        STATE.setdefault("surge_log", []).append(
+            {"t": r["t"], "date": datetime.now(ET).date().isoformat(), "at": now_iso,
+             "price": r["price"], "score": r["score"], "max_gain": None})
     icon = "🌅" if sess == "프리장" else "🔔"
     kst = datetime.now(KST).strftime("%H:%M")
     msg = (f"🚀 <b>급등 후보</b> ({icon} {sess} {kst})\n"
-           + table(["티커", "주가", "등락", "거래량", "위험"], tbl, right={1, 2, 3})
-           + why)
+           + table(["티커", "주가", "등락", "점수", "저항"], tbl, right={1, 2, 3, 4})
+           + "\n".join(why)
+           + "\n\n<i>점수: 0~100 · 저항: 다음 저항선까지 남은 %\n적중: 알림 후 +20% 도달 비율 (봇 실제 기록)</i>")
     if dumped:
         msg += f"\n\n🚫 설거지 의심 제외: {', '.join(dumped)}"
     send(msg + "\n⚠️ 저가주는 변동성 극심 · 손절 필수")
@@ -844,6 +910,10 @@ def run_once() -> None:
         return
 
     o, c = hours
+    try:
+        evaluate_surge_log()
+    except Exception as e:
+        log.exception("적중률 집계 오류: %s", e)
     try:
         check_news()
     except Exception as e:
