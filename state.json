@@ -19,7 +19,8 @@
       "OLOX",
       "SHMD",
       "INVE",
-      "NEXR"
+      "NEXR",
+      "AMOD"
     ]
   },
   "surge_log": [
@@ -45,6 +46,14 @@
       "at": "2026-10-21T11:33:05.431457+00:00",
       "price": 2.629,
       "score": 63,
+      "max_gain": null
+    },
+    {
+      "t": "AMOD",
+      "date": "2026-10-21",
+      "at": "2026-10-21T13:26:44.798710+00:00",
+      "price": 1.8303,
+      "score": 79,
       "max_gain": null
     }
   ]
