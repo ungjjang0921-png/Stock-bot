@@ -1,0 +1,7 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "deploy": {
+    "startCommand": "python stock_alert_bot.py",
+    "restartPolicyType": "ALWAYS"
+  }
+}
