@@ -1,4 +1,20 @@
 {
   "chat_id": "7708951042",
-  "last_alert": {}
+  "tickers": [
+    "AAPL",
+    "TSLA",
+    "NVDA"
+  ],
+  "last_alert": {},
+  "news_seen": [],
+  "done": {},
+  "update_offset": 757962976,
+  "surge_alerted": {
+    "2026-10-21": [
+      "RBNE",
+      "WHLR",
+      "SPHL",
+      "SHFS"
+    ]
+  }
 }
