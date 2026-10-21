@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>펌핑 목적 워치리스트</title>
+<style>
+:root{
+  --bg:#0b1118;--panel:#111a24;--panel2:#162231;--line:#22324a;--text:#e6edf5;--muted:#8a9bb0;
+  --accent:#5ec8ff;--good:#3ddc97;--warn:#f5b84a;--bad:#ff6b6b;--violet:#b49cff;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif}
+header{position:sticky;top:0;z-index:5;background:rgba(11,17,24,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:12px 16px 10px}
+h1{font-size:17px;margin:0;letter-spacing:-.2px}
+.sub{color:var(--muted);font-size:12px;margin-top:2px}
+.controls{display:flex;gap:8px;margin-top:10px}
+input,select{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:9px 10px;font-size:14px}
+select{flex:0 0 auto;max-width:46%}
+.chips{display:flex;gap:6px;overflow-x:auto;margin-top:8px;padding-bottom:2px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:5px 10px;font-size:12px;cursor:pointer}
+.chip.on{border-color:var(--accent);color:var(--accent);background:#0f2433}
+main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-bottom:10px;overflow:hidden}
+.top{display:grid;grid-template-columns:auto 1fr auto;gap:10px;padding:12px;cursor:pointer;align-items:start}
+.rank{width:26px;height:26px;border-radius:50%;background:var(--panel2);display:grid;place-items:center;font-size:12px;color:var(--muted);font-weight:700}
+.rank.r1{background:#d98e2b;color:#111}.rank.r2{background:#9aa7b5;color:#111}.rank.r3{background:#b6763f;color:#111}
+.tk{font-weight:800;font-size:16px;letter-spacing:.3px}
+.nm{color:var(--muted);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:52vw}
+.px{font-family:var(--mono);font-size:13px;margin-top:2px}
+.up{color:var(--good)}.dn{color:var(--bad)}
+.score{text-align:right}
+.score b{font-size:22px;font-family:var(--mono);color:var(--good)}
+.score small{display:block;color:var(--muted);font-size:11px}
+.meta{display:flex;flex-wrap:wrap;gap:6px 12px;padding:0 12px 8px;font-size:12px;color:var(--muted)}
+.meta span b{color:var(--text);font-weight:600}
+.bars{display:inline-flex;gap:2px;vertical-align:-1px;margin-right:4px}
+.bars i{width:4px;background:var(--line);border-radius:1px}
+.bars i.on{background:var(--warn)}
+.tags{display:flex;flex-wrap:wrap;gap:5px;padding:0 12px 10px}
+.tag{font-size:11.5px;border-radius:6px;padding:3px 7px;background:var(--panel2);border:1px solid var(--line)}
+.tag em{font-style:normal;opacity:.75;margin-left:4px;font-size:10.5px}
+.t-red{border-color:#5a2b33;background:#2a1519;color:#ffb3b3}
+.t-org{border-color:#5a4520;background:#2a2112;color:#ffd38a}
+.t-vio{border-color:#3e3566;background:#1d1a33;color:#cdbfff}
+.t-grn{border-color:#1f4a3a;background:#10261e;color:#9ff0c9}
+.plan{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line)}
+.plan div{padding:8px 10px;border-right:1px solid var(--line)}
+.plan div:last-child{border-right:0}
+.plan small{display:block;color:var(--muted);font-size:10.5px}
+.plan b{font-family:var(--mono);font-size:13px}
+.detail{display:none;border-top:1px solid var(--line);background:#0e1620;padding:12px;font-size:12.5px}
+.card.open .detail{display:block}
+.sec{margin-bottom:12px}
+.sec h3{font-size:12px;color:var(--accent);margin:0 0 6px;font-weight:700}
+.ck{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}
+.ck span:before{content:"✕ ";color:var(--bad)}
+.ck span.ok:before{content:"✓ ";color:var(--good)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px}
+.kv dt{color:var(--muted)}.kv dd{margin:0;font-family:var(--mono)}
+.fl{list-style:none;margin:0;padding:0}
+.fl li{display:flex;gap:8px;padding:5px 0;border-bottom:1px dashed var(--line)}
+.fl li span:first-child{font-family:var(--mono);color:var(--muted);flex:0 0 78px}
+.fl a{color:var(--text);text-decoration:none}
+.fl a b{color:var(--violet);font-weight:600;margin-right:4px}
+.ai{background:#1a1830;border:1px solid #3e3566;border-radius:10px;padding:9px 10px;white-space:pre-wrap}
+.note{color:var(--muted);font-size:11px;line-height:1.5}
+.empty{color:var(--muted);text-align:center;padding:40px 0}
+.dday{color:var(--warn);font-family:var(--mono)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🎯 펌핑 목적 워치리스트</h1>
+  <div class="sub" id="sub"></div>
+  <div class="controls">
+    <input id="q" placeholder="티커·회사명 검색" autocomplete="off">
+    <select id="sort">
+      <option value="total">통합점수순</option>
+      <option value="strength">부양 강도순</option>
+      <option value="stage">차트 단계순</option>
+      <option value="runway">런웨이 짧은순</option>
+      <option value="dday">기한 임박순</option>
+      <option value="upside">상승 여력순</option>
+    </select>
+  </div>
+  <div class="chips" id="chips"></div>
+</header>
+<main id="list"></main>
+<script>
+const DATA = /*__DATA__*/null;
+const FILTERS = ["상장 유지","현금 조달","물량 출회","병합","매집 의심","소형 유통","공모 준비","ATM·공모","공시 지연"];
+const RED = ["급함","필요","기한형","위험"], ORG = ["가능","예정","진행","활성","안건 가능"];
+const CK = {ma20:"20일선 이격 0~15%",lows:"최근 저점 상승",upvol:"상승일 거래량 우위",liq:"거래대금 충족",cool:"과열 아님"};
+let on = new Set();
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const usd = v => v == null ? "-" : (v < 1 ? "$" + v.toFixed(4) : "$" + v.toFixed(2));
+const big = v => v == null ? "-" : (Math.abs(v) >= 1e6 ? "$" + (v / 1e6).toFixed(2) + "M" : "$" + (v / 1e3).toFixed(0) + "K");
+const rwTxt = r => r == null ? "미확인" : r >= 99 ? "흑자" : r.toFixed(1) + "개월";
+const nearest = it => (it.ddays && it.ddays.length) ? it.ddays[0] : null;
+const upside = it => it.target ? (it.target / it.price - 1) * 100 : -1;
+
+function tagCls(t){
+  if (t.name === "매집 의심" || t.name === "소형 유통") return "t-vio";
+  if (RED.includes(t.level)) return "t-red";
+  if (ORG.includes(t.level)) return "t-org";
+  return "t-grn";
+}
+function bars(n){ return '<span class="bars">' + [6,8,10,12,14].map((h,i)=>`<i style="height:${h}px" class="${i<n?'on':''}"></i>`).join("") + "</span>"; }
+
+function card(it, i){
+  const d = nearest(it), up = upside(it), s = it.similar || {};
+  const chg = it.chg == null ? "" : `<span class="${it.chg>=0?'up':'dn'}">${it.chg>=0?'+':''}${it.chg.toFixed(1)}%</span>`;
+  const tags = it.tags.map(t => `<span class="tag ${tagCls(t)}">${esc(t.name)}<em>${esc(t.level)}</em></span>`).join("");
+  const checks = Object.entries(CK).map(([k,v]) => `<span class="${it.checks && it.checks[k]?'ok':''}">${v}</span>`).join("");
+  const fl = (it.filings||[]).map(f => `<li><span>${esc(f.date)}</span><a href="${esc(f.url)}" target="_blank" rel="noopener"><b>${esc(f.form)}${f.items && f.form==='8-K'?' '+esc(f.items.split(',').filter(x=>x!=='9.01').join(',')):''}</b>${esc(f.ko)}</a></li>`).join("") || '<li><span>-</span>공시 없음 (해외기업이거나 미등록)</li>';
+  const dd = (it.ddays||[]).map(x => `<dt>${esc(x.label)}</dt><dd>${esc(x.date)} <span class="dday">D${x.d>=0?'-':'+'}${Math.abs(x.d)}</span></dd>`).join("");
+  return `<article class="card" id="c-${esc(it.t)}">
+    <div class="top" onclick="this.parentNode.classList.toggle('open')">
+      <div class="rank ${i<3?'r'+(i+1):''}">${i+1}</div>
+      <div><div class="tk">${esc(it.t)}</div><div class="nm">${esc(it.name)}</div><div class="px">${usd(it.price)} ${chg}</div></div>
+      <div class="score"><b>${it.total.toFixed(0)}</b><small>통합점수</small></div>
+    </div>
+    <div class="meta">
+      <span>${bars(it.strength)}강도 <b>${it.strength}/5</b></span>
+      <span>차트 <b>${it.stage}/5</b> ${esc(it.stage_name)}</span>
+      <span>런웨이 <b>${rwTxt(it.runway)}</b></span>
+      ${d ? `<span>${esc(d.label)} <b class="dday">D${d.d>=0?'-':'+'}${Math.abs(d.d)}</b></span>` : ""}
+      ${it.float ? `<span>유통 <b>${(it.float/1e6).toFixed(1)}M</b></span>` : ""}
+    </div>
+    <div class="tags">${tags || '<span class="tag">뚜렷한 동기 없음</span>'}</div>
+    <div class="plan">
+      <div><small>참고 진입가</small><b>${usd(it.price)}</b></div>
+      <div><small>유사군 예상 고점</small><b class="up">${it.target ? usd(it.target) : "-"}</b>${up>0?`<small>+${up.toFixed(0)}% · ${s.median.toFixed(2)}배</small>`:""}</div>
+      <div><small>손절 참고</small><b class="dn">${usd(it.stop)}</b></div>
+    </div>
+    <div class="detail">
+      ${it.ai ? `<div class="sec"><h3>🤖 AI 종합 판단</h3><div class="ai">${esc(it.ai)}</div></div>` : ""}
+      <div class="sec"><h3>차트 진입 조건 ${it.stage}/5</h3><div class="ck">${checks}</div></div>
+      <div class="sec"><h3>과거 유사 사례 (같은 단계 · ${DATA.forward}거래일)</h3>
+        ${s.n ? `<dl class="kv"><dt>사례 수</dt><dd>${s.n.toLocaleString()}건</dd><dt>중앙 고점 배수</dt><dd>${s.median.toFixed(2)}배</dd><dt>+20% 도달</dt><dd>${s.hit20.toFixed(0)}%</dd><dt>+50% 도달</dt><dd>${s.hit50.toFixed(0)}%</dd></dl>` : '<div class="note">사례 부족</div>'}
+      </div>
+      <div class="sec"><h3>런웨이 · 재무</h3><dl class="kv">
+        <dt>현금</dt><dd>${big(it.cash)}</dd><dt>월 소진</dt><dd>${it.burn==null?'-':it.burn<=0?'흑자':big(it.burn)}</dd>
+        <dt>자기자본</dt><dd>${big(it.equity)}</dd><dt>시가총액</dt><dd>${big(it.mcap)}</dd>${dd}</dl></div>
+      <div class="sec"><h3>부양 동기 근거</h3><div class="note">${it.tags.map(t=>`• <b>${esc(t.name)}</b> ${esc(t.level)} ${esc(t.note||"")}`).join("<br>") || "-"}</div></div>
+      <div class="sec"><h3>최근 공시 (SEC 원문)</h3><ul class="fl">${fl}</ul></div>
+      <div class="note">통합점수 = 부양 강도 45% + 차트 조건 35% + 유사 사례 +20% 도달률 20%. 순서를 정하는 점수이며 성공 확률이 아닙니다. 기한·런웨이는 공시 기준 추정치라 원문 확인이 필요합니다.</div>
+    </div>
+  </article>`;
+}
+
+function render(){
+  if (!DATA){ $("#list").innerHTML = '<div class="empty">데이터가 아직 없어요</div>'; return; }
+  const q = $("#q").value.trim().toLowerCase(), sort = $("#sort").value;
+  let xs = DATA.items.filter(it => (!q || it.t.toLowerCase().includes(q) || (it.name||"").toLowerCase().includes(q))
+    && [...on].every(f => it.tags.some(t => t.name === f)));
+  const key = {
+    total: it => -it.total, strength: it => -(it.strength*100 + it.total), stage: it => -(it.stage*100 + it.total),
+    runway: it => it.runway == null ? 1e9 : it.runway, dday: it => { const d = nearest(it); return d ? d.d : 1e9; },
+    upside: it => -upside(it)
+  }[sort];
+  xs.sort((a,b) => key(a) - key(b));
+  $("#sub").textContent = `${DATA.updated} 업데이트 · ${xs.length}/${DATA.items.length}종목 · 카드를 누르면 상세`;
+  $("#list").innerHTML = xs.map(card).join("") || '<div class="empty">조건에 맞는 종목이 없어요</div>';
+}
+$("#chips").innerHTML = FILTERS.map(f => `<span class="chip" data-f="${f}">${f}</span>`).join("");
+$("#chips").addEventListener("click", e => {
+  const f = e.target.dataset.f; if (!f) return;
+  on.has(f) ? on.delete(f) : on.add(f); e.target.classList.toggle("on"); render();
+});
+$("#q").addEventListener("input", render);
+$("#sort").addEventListener("change", render);
+render();
+</script>
+</body>
+</html>
