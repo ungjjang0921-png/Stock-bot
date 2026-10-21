@@ -10,7 +10,11 @@
     "GPUS": "2026-10-21T14:07:06.775067+00:00"
   },
   "news_seen": [],
-  "done": {},
+  "done": {
+    "2026-10-21": [
+      "scan10:30"
+    ]
+  },
   "update_offset": 757962979,
   "surge_alerted": {
     "2026-10-21": [
@@ -23,7 +27,8 @@
       "INVE",
       "NEXR",
       "AMOD",
-      "POM"
+      "POM",
+      "KTTA"
     ]
   },
   "surge_log": [
