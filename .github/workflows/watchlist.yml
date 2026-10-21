@@ -1,0 +1,38 @@
+name: watchlist
+
+on:
+  schedule:
+    - cron: "31 12 * * 1-5"   # 프리장 (한국시간 밤 9:31)
+    - cron: "41 16 * * 1-5"   # 장중 (새벽 1:41)
+    - cron: "51 20 * * 1-5"   # 마감 직전 (새벽 5:51)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: watchlist
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install yfinance pandas numpy requests
+      - run: python watchlist.py
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          SEC_EMAIL: ${{ secrets.SEC_EMAIL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+      - name: publish
+        if: always()
+        run: |
+          git config user.name "stock-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add docs 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "update dashboard" && git pull --rebase -X theirs && git push)
