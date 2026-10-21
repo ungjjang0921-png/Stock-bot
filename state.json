@@ -6,7 +6,9 @@
     "NVDA",
     "GPUS"
   ],
-  "last_alert": {},
+  "last_alert": {
+    "GPUS": "2026-10-21T14:07:06.775067+00:00"
+  },
   "news_seen": [],
   "done": {},
   "update_offset": 757962979,
@@ -20,7 +22,8 @@
       "SHMD",
       "INVE",
       "NEXR",
-      "AMOD"
+      "AMOD",
+      "POM"
     ]
   },
   "surge_log": [
