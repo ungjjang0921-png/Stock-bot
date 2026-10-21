@@ -3,18 +3,39 @@
   "tickers": [
     "AAPL",
     "TSLA",
-    "NVDA"
+    "NVDA",
+    "GPUS"
   ],
   "last_alert": {},
   "news_seen": [],
   "done": {},
-  "update_offset": 757962976,
+  "update_offset": 757962978,
   "surge_alerted": {
     "2026-10-21": [
       "RBNE",
       "WHLR",
       "SPHL",
-      "SHFS"
+      "SHFS",
+      "OLOX",
+      "SHMD"
     ]
-  }
+  },
+  "surge_log": [
+    {
+      "t": "SHMD",
+      "date": "2026-10-21",
+      "at": "2026-10-21T10:48:14.333547+00:00",
+      "price": 3.4547,
+      "score": 58,
+      "max_gain": null
+    },
+    {
+      "t": "OLOX",
+      "date": "2026-10-21",
+      "at": "2026-10-21T10:48:14.333547+00:00",
+      "price": 0.8359,
+      "score": 51,
+      "max_gain": null
+    }
+  ]
 }
