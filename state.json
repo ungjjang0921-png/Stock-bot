@@ -25,7 +25,10 @@
       "RBNE",
       "STAK",
       "BKYI",
-      "SHFS"
+      "SHFS",
+      "INLF",
+      "XXII",
+      "AKAN"
     ]
   },
   "surge_log": [
