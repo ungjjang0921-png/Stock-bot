@@ -113,7 +113,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .prob .pb i{display:block;height:100%;border-radius:3px;background:var(--good)}
 .prob em{font-style:normal;font-size:10.5px;color:var(--muted)}
 .prob .act{display:inline-block;margin-top:2px;font-size:11px;font-weight:700}
-.tabs{display:flex;gap:6px;margin-top:10px}
+.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
 .tab{flex:1;text-align:center;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:10px;padding:9px 2px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
 .tab.on{border-color:var(--accent);color:var(--text);background:#0f2433}
 .hide{display:none!important}
@@ -152,13 +152,28 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .sc th{color:var(--muted);font-weight:600;font-family:inherit}
 .sc td:first-child,.sc th:first-child{text-align:left;font-family:inherit}
 .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:12px}
+.side{display:inline-block;font-size:11px;font-weight:800;border-radius:6px;padding:2px 7px;margin-right:5px}
+.side.악재{background:#3a1519;color:#ff8f8f}.side.주의{background:#3a2a10;color:#ffc062}
+.side.호재{background:#10301f;color:#6be3a4}.side.중립{background:#22262e;color:#c9d3df}
+.frow{display:grid;grid-template-columns:1fr auto;gap:4px 8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 10px;margin-bottom:6px}
+.frow .ft{font-weight:800;font-size:14px;cursor:pointer}.frow .ft small{font-weight:400;color:var(--muted);font-size:11px;margin-left:5px}
+.frow .fl{grid-column:1/3;font-size:12.5px}.frow .fm{font-size:11px;color:var(--muted);text-align:right}
+.frow a{color:var(--accent);font-size:11.5px;text-decoration:none}
+.seg{display:flex;gap:6px;margin:0 0 10px}.seg span{flex:1;text-align:center;border:1px solid var(--line);border-radius:8px;padding:6px 0;font-size:12px;color:var(--muted);cursor:pointer}
+.seg span.on{border-color:var(--accent);color:var(--text)}
+.drow{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px;cursor:pointer}
+.drow .dh{display:flex;justify-content:space-between;align-items:center}
+.drow .dh b{font-size:15px}.risk{font-size:11.5px;font-weight:800;border-radius:6px;padding:2px 8px}
+.risk.높음{background:#3a1519;color:#ff8f8f}.risk.중간{background:#3a2a10;color:#ffc062}.risk.낮음{background:#22262e;color:#c9d3df}
+.drow .dg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px;font-size:11px;color:var(--muted)}
+.drow .dg b{display:block;font-family:var(--mono);font-size:14px;color:var(--text)}
 </style>
 </head>
 <body>
 <header>
   <h1>🎯 펌핑 목적 워치리스트</h1>
   <div class="sub" id="sub"></div>
-  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="surge">🚀 급등</span><span class="tab" data-v="jb">🎯 종배</span><span class="tab" data-v="cal">📅 일정</span></div>
+  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="surge">🚀 급등</span><span class="tab" data-v="jb">🎯 종배</span><span class="tab" data-v="cal">📅 일정</span><span class="tab" data-v="feed">📑 공시</span><span class="tab" data-v="dil">💧 희석</span></div>
   <div class="controls" id="ctl">
     <input id="q" placeholder="티커·회사명 검색" autocomplete="off">
     <select id="sort">
@@ -367,6 +382,31 @@ function render(){
       h += `<div class="crow" onclick="openCard('${esc(e.t)}')"><b>${esc(e.t)}</b><div><em>${esc(e.ev)}</em><small>${esc(e.name)} · ${esc(e.note)}</small></div></div>`;
     }
     $("#list").innerHTML = xs.length ? h : h + '<div class="empty">14일 안에 확인된 일정이 없어요</div>';
+    return;
+  }
+  if (TAB === "feed"){
+    const all = DATA.feed || [];
+    window.FSIDE = window.FSIDE || "전체";
+    const xs = all.filter(f => FSIDE === "전체" || f.side === FSIDE);
+    const cnt = k => all.filter(f => k === "전체" || f.side === k).length;
+    $("#sub").textContent = `${DATA.updated} 업데이트 · 최근 10일 SEC 공시`;
+    $("#list").innerHTML = `<div class="intro">📑 <b>소형주 공시 호재·악재</b> — 워치리스트 종목의 SEC 공시를 자동 분류했어요. <b>악재</b>=희석·공모·상장 미달·보고 지연, <b>주의</b>=Shelf·효력 발생·병합 안건, <b>호재</b>=계약 체결·인수·지분 취득. 원문으로 꼭 확인하세요.</div>
+      <div class="seg">${["전체","악재","주의","호재"].map(k => `<span class="${FSIDE === k ? 'on' : ''}" onclick="FSIDE='${k}';render()">${k} ${cnt(k)}</span>`).join("")}</div>
+      ${xs.map(f => `<div class="frow"><div class="ft" onclick="openCard('${esc(f.t)}')">${esc(f.t)}<small>${esc(f.name).slice(0, 28)}</small></div>
+        <div class="fm">${esc(f.date.slice(5))}<br>${pfmt(f.price)} ${f.chg == null ? "" : `<span class="${f.chg >= 0 ? 'up' : 'dn'}">${f.chg >= 0 ? "+" : ""}${f.chg.toFixed(1)}%</span>`}</div>
+        <div class="fl"><span class="side ${esc(f.side)}">${esc(f.side)}</span>${esc(f.label)} <span style="color:var(--muted)">(${esc(f.form)})</span> · <a href="${esc(f.url)}" target="_blank" rel="noopener">원문</a></div></div>`).join("") || '<div class="empty">해당 공시가 없어요</div>'}`;
+    return;
+  }
+  if (TAB === "dil"){
+    const xs = DATA.dil || [];
+    const big = v => v == null ? "-" : v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : (v / 1e3).toFixed(0) + "K";
+    $("#sub").textContent = `${DATA.updated} 업데이트 · 희석·유상증자 위험 순`;
+    $("#list").innerHTML = `<div class="intro">💧 <b>희석·유증 위험</b> — ATM(시장가 증자)·공모 준비·미등록 발행·재판매 물량·Shelf·현금 소진, 그리고 <b>실제 발행주식 증가율</b>(SEC 기준, 약 5개월+ 전 대비)로 매긴 위험도예요. 위험 높은 종목은 급등해도 물량이 쏟아질 수 있어요.</div>`
+      + (xs.map(d => `<div class="drow" onclick="openCard('${esc(d.t)}')"><div class="dh"><b>${esc(d.t)} <small style="font-weight:400;color:var(--muted);font-size:11px">${esc(d.name).slice(0, 26)}</small></b><span class="risk ${esc(d.risk)}">희석 ${esc(d.risk)}</span></div>
+        <div class="chipsm" style="padding:8px 0 0">${d.flags.map(f => `<span class="rk">${esc(f)}</span>`).join("")}</div>
+        <div class="dg"><div>주식수 증가<b class="${d.growth > 0 ? 'dn' : ''}">${d.growth == null ? "-" : (d.growth >= 0 ? "+" : "") + d.growth.toFixed(0) + "%"}</b>${d.sh_prev_date ? esc(d.sh_prev_date.slice(2, 7)) + "→" + esc((d.sh_date || "").slice(2, 7)) : ""}</div>
+        <div>발행주식<b>${big(d.sh_now)}</b>유통 ${big(d.float)}</div><div>최근 희석공시<b>${d.last ? esc(d.last.slice(5)) : "-"}</b>${pfmt(d.price)}</div></div></div>`).join("")
+        || '<div class="empty">희석 위험 종목이 없어요</div>');
     return;
   }
   if (TAB === "jb"){

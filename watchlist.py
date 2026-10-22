@@ -273,6 +273,22 @@ def monthly_burn(facts: list[dict]) -> float | None:
     return -float(f["val"]) / months
 
 
+def shares_hist(cik: int) -> dict | None:
+    """발행주식수 (최신 vs 약 5개월+ 전) — 실제로 얼마나 희석됐는지"""
+    d = sec_get(f"https://data.sec.gov/api/xbrl/companyconcept/CIK{cik:010d}/dei/EntityCommonStockSharesOutstanding.json")
+    pts = [f for f in (d or {}).get("units", {}).get("shares", []) if "end" in f]
+    if not pts:
+        return None
+    pts.sort(key=lambda f: (f["end"], f.get("filed", "")))
+    now = pts[-1]
+    end = date.fromisoformat(now["end"])
+    older = [f for f in pts if date.fromisoformat(f["end"]) <= end - timedelta(days=150)]
+    prev = older[-1] if older else None
+    g = (now["val"] / prev["val"] - 1) * 100 if prev and prev["val"] else None
+    return {"now": now["val"], "now_date": now["end"], "prev": prev["val"] if prev else None,
+            "prev_date": prev["end"] if prev else None, "growth": None if g is None else round(g, 1)}
+
+
 def financials(cik: int) -> dict:
     cash = None
     for name in ("CashAndCashEquivalentsAtCarryingValue",
@@ -285,7 +301,11 @@ def financials(cik: int) -> dict:
     runway = None
     if cash and burn is not None:
         runway = 99.0 if burn <= 0 else cash[0] / burn
-    return {"cash": cash[0] if cash else None, "cash_date": cash[1] if cash else None,
+    try:
+        sh = shares_hist(cik)
+    except Exception:
+        sh = None
+    return {"sh": sh, "cash": cash[0] if cash else None, "cash_date": cash[1] if cash else None,
             "burn": burn, "runway": runway, "equity": eq[0] if eq else None}
 
 
@@ -1140,6 +1160,8 @@ def ai_summary(item: dict) -> str:
 # ───────────────── 6-2. 하루 캐시 (30분 갱신 시 큰 데이터 재다운로드 방지) ─────────────────
 _CACHE: dict = {}
 CALENDAR: list = []
+FEED: list = []
+DILUTION: list = []
 
 
 def _cday() -> str:
@@ -1196,15 +1218,120 @@ def premarket_highs_cached(tickers):
 def sec_cached(cik):
     if not cik:
         return [], {}
-    c = cache_load("sec")
+    c = cache_load("sec2")
     if cik not in c:
         c[cik] = (filings(cik), financials(cik))
     return c[cik]
 
 
 # ───────────────── 7. 조립 ─────────────────
-FILING_FORMS = ("8-K", "424B5", "424B4", "424B3", "S-1", "S-1/A", "S-3", "S-3/A",
-                "EFFECT", "DEF 14A", "PRE 14A", "NT 10-Q", "NT 10-K", "10-Q", "10-K")
+FILING_FORMS = ("8-K", "8-K/A", "424B5", "424B4", "424B3", "S-1", "S-1/A", "S-3", "S-3/A", "F-1", "F-3",
+                "EFFECT", "DEF 14A", "PRE 14A", "NT 10-Q", "NT 10-K", "10-Q", "10-K", "6-K",
+                "SC 13D", "SC 13D/A", "SC 13G")
+
+# ── 공시 호재·악재 분류 ──
+ITEM_KO = {"1.01": ("호재", "주요 계약 체결"), "2.01": ("호재", "인수·합병 완료"), "1.02": ("악재", "계약 해지"),
+           "1.03": ("악재", "파산"), "2.02": ("중립", "실적 발표"), "2.04": ("악재", "채무 조기상환 사유"),
+           "3.01": ("악재", "상장 규정 미달 통지"), "3.02": ("악재", "미등록 주식 발행(희석)"),
+           "3.03": ("주의", "주주 권리 변경"), "4.01": ("주의", "감사인 교체"), "4.02": ("악재", "과거 재무제표 신뢰 불가"),
+           "5.02": ("주의", "임원 변동"), "5.03": ("주의", "정관 변경(병합 가능)"), "5.07": ("중립", "주총 결과"),
+           "7.01": ("중립", "IR·보도자료"), "8.01": ("중립", "기타 중요 공시")}
+FORM_SIDE = {"424B5": ("악재", "ATM·공모 설명서 (희석)"), "424B4": ("악재", "공모가 확정 (희석)"),
+             "424B3": ("악재", "재판매 등록 (물량 출회)"), "S-1": ("악재", "증권신고서 (공모 준비)"),
+             "S-1/A": ("악재", "증권신고서 정정 (공모 임박)"), "F-1": ("악재", "증권신고서 (해외기업 공모)"),
+             "S-3": ("주의", "선반등록 Shelf (언제든 증자 가능)"), "S-3/A": ("주의", "Shelf 정정"),
+             "F-3": ("주의", "선반등록 Shelf (해외기업)"), "EFFECT": ("주의", "신고서 효력 발생 — 곧 발행 가능"),
+             "NT 10-Q": ("악재", "분기보고 지연"), "NT 10-K": ("악재", "연간보고 지연"),
+             "SC 13D": ("호재", "5% 이상 지분 취득 (경영 참여 목적)"), "SC 13D/A": ("주의", "대주주 지분 변동"),
+             "SC 13G": ("중립", "5% 이상 보유 보고"), "PRE 14A": ("주의", "주총 안건 (병합·증자 승인 가능)"),
+             "DEF 14A": ("중립", "주총 위임장"), "10-Q": ("중립", "분기보고서"), "10-K": ("중립", "연간보고서"),
+             "6-K": ("중립", "해외기업 수시공시")}
+SIDE_RANK = {"악재": 3, "주의": 2, "호재": 1, "중립": 0}
+
+
+def classify_filing(f: dict) -> tuple[str, str]:
+    form = f["form"]
+    if form.startswith("8-K"):
+        its = [i.strip() for i in f.get("items", "").split(",") if i.strip() and i.strip() != "9.01"]
+        labs = [ITEM_KO.get(i, ("중립", f"Item {i}")) for i in its]
+        if "1.01" in its and "3.02" in its:
+            return "악재", "증자 계약 체결 (주식·워런트 발행)"
+        if not labs:
+            return "중립", "수시공시"
+        side = max((x[0] for x in labs), key=lambda v: SIDE_RANK[v] if v != "호재" else 1.5)
+        return side, " · ".join(dict.fromkeys(x[1] for x in labs))
+    return FORM_SIDE.get(form, ("중립", form))
+
+
+FEED_DAYS = 10
+
+
+def build_feed(items) -> list[dict]:
+    cutoff = (datetime.now(KST).date() - timedelta(days=FEED_DAYS)).isoformat()
+    out = []
+    for it in items:
+        for f in it.get("filings", []):
+            if f["date"] < cutoff:
+                continue
+            side, label = classify_filing(f)
+            if side == "중립" and f["form"] in ("10-Q", "10-K", "DEF 14A", "6-K"):
+                continue
+            out.append({"t": it["t"], "name": it["name"], "date": f["date"], "form": f["form"], "side": side,
+                        "label": label, "url": f["url"], "price": it["price"], "chg": it.get("chg"), "mcap": it.get("mcap")})
+    out.sort(key=lambda x: (x["date"], SIDE_RANK[x["side"]]), reverse=True)
+    return out[:200]
+
+
+def build_dilution(items) -> list[dict]:
+    today = datetime.now(KST).date()
+    out = []
+    for it in items:
+        fs = it.get("filings", [])
+
+        def recent(forms, days, item=None):
+            for f in fs:
+                if f["form"] in forms and (today - date.fromisoformat(f["date"])).days <= days \
+                        and (item is None or item in f.get("items", "")):
+                    return f
+            return None
+        flags, score, last = [], 0, None
+        for forms, days, item, pts, lab in [
+            (("424B5", "424B4"), 120, None, 3, "ATM·공모 진행"),
+            (("S-1", "S-1/A", "F-1"), 120, None, 3, "공모 준비(S-1)"),
+            (("8-K", "8-K/A"), 180, "3.02", 2, "미등록 발행"),
+            (("424B3",), 180, None, 2, "재판매 물량"),
+            (("EFFECT",), 60, None, 1, "신고서 효력"),
+            (("S-3", "S-3/A", "F-3"), 3 * 365, None, 1, "Shelf 보유"),
+        ]:
+            f = recent(forms, days, item)
+            if f:
+                flags.append(lab)
+                score += pts
+                last = max(last or f["date"], f["date"])
+        rw = it.get("runway")
+        if rw is not None and rw < 6:
+            score += 2; flags.append(f"현금 {rw:.1f}개월")
+        elif rw is not None and rw < 12:
+            score += 1; flags.append(f"현금 {rw:.0f}개월")
+        sh = it.get("sh") or {}
+        g = sh.get("growth")
+        if g is not None:
+            if g >= 100:
+                score += 3
+            elif g >= 30:
+                score += 2
+            elif g >= 10:
+                score += 1
+        if any(t["name"] in ("병합", "병합 이력") for t in it["tags"]):
+            score += 1; flags.append("병합")
+        if score < 2:
+            continue
+        out.append({"t": it["t"], "name": it["name"], "price": it["price"], "chg": it.get("chg"),
+                    "score": score, "risk": "높음" if score >= 6 else "중간" if score >= 4 else "낮음",
+                    "flags": flags, "growth": g, "sh_now": sh.get("now"), "sh_prev_date": sh.get("prev_date"),
+                    "sh_date": sh.get("now_date"), "runway": rw, "last": last, "float": it.get("float")})
+    out.sort(key=lambda x: (-x["score"], -(x["growth"] or 0)))
+    return out[:80]
 
 
 def analyze() -> list[dict]:
@@ -1241,7 +1368,7 @@ def analyze() -> list[dict]:
                 "float": u["float"], "cik": cik, "watch": bool(u.get("watch")),
                 "strength": strength(raw), "raw": raw,
                 "runway": fin.get("runway"), "cash": fin.get("cash"), "burn": fin.get("burn"),
-                "equity": fin.get("equity"), "tags": tags, "ddays": ddays,
+                "equity": fin.get("equity"), "sh": fin.get("sh"), "tags": tags, "ddays": ddays,
                 "stage": stg, "stage_name": STAGE_NAME[stg],
                 "checks": {k: bool(frames[t][k].iloc[-1]) for k in ("ma20", "lows", "upvol", "liq", "cool")}
                 if t in frames else {},
@@ -1257,11 +1384,19 @@ def analyze() -> list[dict]:
     for it in items[:AI_TOP]:
         it["ai"] = ai_summary(it)
     surge, jbc = build_candidates(items, prices, frames, jb_m)
-    global CALENDAR
-    try:
-        CALENDAR = build_calendar(items, surge, jbc)
-    except Exception as e:
-        log.warning("캘린더 실패: %s", e)
+    global CALENDAR, FEED, DILUTION
+    for name, fn in (("캘린더", lambda: build_calendar(items, surge, jbc)), ("공시", lambda: build_feed(items)),
+                     ("희석", lambda: build_dilution(items))):
+        try:
+            val = fn()
+            if name == "캘린더":
+                CALENDAR = val
+            elif name == "공시":
+                FEED = val
+            else:
+                DILUTION = val
+        except Exception as e:
+            log.warning("%s 실패: %s", name, e)
     save_caches()
     return items, surge, jbc
 
@@ -1287,7 +1422,7 @@ def write_page(items: list[dict], surge=None, jbc=None) -> None:
     tpl = (ROOT / "dashboard_template.html").read_text(encoding="utf-8")
     payload = _clean({"updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"), "items": items,
                       "forward": FORWARD_DAYS, "surge": surge or [], "jbc": jbc or [],
-                      "cal": CALENDAR,
+                      "cal": CALENDAR, "feed": FEED, "dil": DILUTION,
                       "rules": {"reg": int(SURGE_REG * 100), "pre": int(SURGE_PRE * 100), "jb": int(JB_HIT * 100)}})
     data = json.dumps(payload, ensure_ascii=False, default=lambda o: None).replace("</", "<\\/")
     OUT.parent.mkdir(parents=True, exist_ok=True)
