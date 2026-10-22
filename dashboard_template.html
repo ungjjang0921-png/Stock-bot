@@ -113,7 +113,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .prob .pb i{display:block;height:100%;border-radius:3px;background:var(--good)}
 .prob em{font-style:normal;font-size:10.5px;color:var(--muted)}
 .prob .act{display:inline-block;margin-top:2px;font-size:11px;font-weight:700}
-.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
+.tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-top:10px}
 .tab{flex:1;text-align:center;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:10px;padding:9px 2px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
 .tab.on{border-color:var(--accent);color:var(--text);background:#0f2433}
 .hide{display:none!important}
@@ -167,13 +167,14 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .risk.높음{background:#3a1519;color:#ff8f8f}.risk.중간{background:#3a2a10;color:#ffc062}.risk.낮음{background:#22262e;color:#c9d3df}
 .drow .dg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px;font-size:11px;color:var(--muted)}
 .drow .dg b{display:block;font-family:var(--mono);font-size:14px;color:var(--text)}
+.rep{display:block;text-align:center;margin:0 0 12px;padding:10px;border-radius:10px;background:#0f2433;border:1px solid var(--accent);color:var(--accent);font-weight:700;text-decoration:none}
 </style>
 </head>
 <body>
 <header>
   <h1>🎯 펌핑 목적 워치리스트</h1>
   <div class="sub" id="sub"></div>
-  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="surge">🚀 급등</span><span class="tab" data-v="jb">🎯 종배</span><span class="tab" data-v="cal">📅 일정</span><span class="tab" data-v="feed">📑 공시</span><span class="tab" data-v="dil">💧 희석</span></div>
+  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="surge">🚀 급등</span><span class="tab" data-v="jb">🎯 종배</span><span class="tab" data-v="cal">📅 일정</span><span class="tab" data-v="dil">💧 희석</span></div>
   <div class="controls" id="ctl">
     <input id="q" placeholder="티커·회사명 검색" autocomplete="off">
     <select id="sort">
@@ -307,6 +308,7 @@ function card(it, i){
       <div><small>손절 참고</small><b class="dn">${usd(it.stop)}</b></div>
     </div>
     <div class="detail">
+      ${(DATA.reports || []).includes(it.t) ? `<a class="rep" href="r.html?t=${encodeURIComponent(it.t)}">📄 상세 리포트 보기 →</a>` : ""}
       ${snapBlock(it)}
       ${it.ai ? `<div class="sec"><h3>🤖 AI 종합 판단</h3><div class="ai">${esc(it.ai)}</div></div>` : ""}
       <div class="sec"><h3>차트 진입 조건 ${it.stage}/5</h3><div class="ck">${checks}</div></div>
@@ -343,7 +345,7 @@ function surgeCard(c, i){
     ${chipsOf(c)}
     ${c.si != null && c.si >= 10 ? `<div class="intro" style="margin:0 12px 10px">공매도 유통 대비 <b>${c.si.toFixed(1)}%</b>${c.dtc != null ? ` · 커버 일수 <b>${c.dtc.toFixed(1)}일</b>` : ""}${c.float ? ` · 유통 ${(c.float / 1e6).toFixed(1)}M주` : ""}</div>` : ""}
     ${scn(c.scenario)}${news(c.news)}
-    <a class="go" href="#c-${esc(c.t)}" onclick="openCard('${esc(c.t)}');return false">상세 분석 보기 →</a></article>`;
+    ${(DATA.reports || []).includes(c.t) ? `<a class="go" href="r.html?t=${encodeURIComponent(c.t)}">📄 상세 리포트 →</a>` : `<a class="go" href="#c-${esc(c.t)}" onclick="openCard('${esc(c.t)}');return false">상세 분석 보기 →</a>`}</article>`;
 }
 function jbCard(c, i){
   const j = c.jb, st = j.st || {};
@@ -354,7 +356,7 @@ function jbCard(c, i){
       ${kp("터지면 평균 고가", st.hit_hi != null ? "+" + st.hit_hi.toFixed(0) + "%" : "-", `유사 ${(j.n || 0).toLocaleString()}일`, "up")}
     </div>
     ${chipsOf(c)}${scn(c.scenario)}${news(c.news)}
-    <a class="go" href="#c-${esc(c.t)}" onclick="openCard('${esc(c.t)}');return false">상세 분석 보기 →</a></article>`;
+    ${(DATA.reports || []).includes(c.t) ? `<a class="go" href="r.html?t=${encodeURIComponent(c.t)}">📄 상세 리포트 →</a>` : `<a class="go" href="#c-${esc(c.t)}" onclick="openCard('${esc(c.t)}');return false">상세 분석 보기 →</a>`}</article>`;
 }
 function openCard(t){
   TAB = "all"; $("#q").value = t; syncTabs(); render();
@@ -382,19 +384,6 @@ function render(){
       h += `<div class="crow" onclick="openCard('${esc(e.t)}')"><b>${esc(e.t)}</b><div><em>${esc(e.ev)}</em><small>${esc(e.name)} · ${esc(e.note)}</small></div></div>`;
     }
     $("#list").innerHTML = xs.length ? h : h + '<div class="empty">14일 안에 확인된 일정이 없어요</div>';
-    return;
-  }
-  if (TAB === "feed"){
-    const all = DATA.feed || [];
-    window.FSIDE = window.FSIDE || "전체";
-    const xs = all.filter(f => FSIDE === "전체" || f.side === FSIDE);
-    const cnt = k => all.filter(f => k === "전체" || f.side === k).length;
-    $("#sub").textContent = `${DATA.updated} 업데이트 · 최근 10일 SEC 공시`;
-    $("#list").innerHTML = `<div class="intro">📑 <b>소형주 공시 호재·악재</b> — 워치리스트 종목의 SEC 공시를 자동 분류했어요. <b>악재</b>=희석·공모·상장 미달·보고 지연, <b>주의</b>=Shelf·효력 발생·병합 안건, <b>호재</b>=계약 체결·인수·지분 취득. 원문으로 꼭 확인하세요.</div>
-      <div class="seg">${["전체","악재","주의","호재"].map(k => `<span class="${FSIDE === k ? 'on' : ''}" onclick="FSIDE='${k}';render()">${k} ${cnt(k)}</span>`).join("")}</div>
-      ${xs.map(f => `<div class="frow"><div class="ft" onclick="openCard('${esc(f.t)}')">${esc(f.t)}<small>${esc(f.name).slice(0, 28)}</small></div>
-        <div class="fm">${esc(f.date.slice(5))}<br>${pfmt(f.price)} ${f.chg == null ? "" : `<span class="${f.chg >= 0 ? 'up' : 'dn'}">${f.chg >= 0 ? "+" : ""}${f.chg.toFixed(1)}%</span>`}</div>
-        <div class="fl"><span class="side ${esc(f.side)}">${esc(f.side)}</span>${esc(f.label)} <span style="color:var(--muted)">(${esc(f.form)})</span> · <a href="${esc(f.url)}" target="_blank" rel="noopener">원문</a></div></div>`).join("") || '<div class="empty">해당 공시가 없어요</div>'}`;
     return;
   }
   if (TAB === "dil"){

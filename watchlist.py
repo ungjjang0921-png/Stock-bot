@@ -34,6 +34,8 @@ import pandas as pd
 import requests
 import yfinance as yf
 
+import report
+
 # ═════════════════════ 설정 ═════════════════════
 EXCHANGES = ["NASDAQ"]
 MIN_PRICE, MAX_PRICE = 0.01, 5.0
@@ -1160,6 +1162,98 @@ def ai_summary(item: dict) -> str:
 # ───────────────── 6-2. 하루 캐시 (30분 갱신 시 큰 데이터 재다운로드 방지) ─────────────────
 _CACHE: dict = {}
 CALENDAR: list = []
+FS_ALL: dict = {}
+PRICES: dict = {}
+REPORTS: list = []
+REPORT_MAX = 90
+FACT_KEYS = ["ClassOfWarrantOrRightOutstanding", "ClassOfWarrantOrRightExercisePriceOfWarrantsOrRights1",
+             "ClassOfWarrantOrRightExercisePriceOfWarrantsOrRights",
+             "ShareBasedCompensationArrangementByShareBasedPaymentAwardOptionsOutstandingNumber",
+             "ShareBasedCompensationArrangementByShareBasedPaymentAwardOptionsOutstandingWeightedAverageExercisePrice",
+             "ShareBasedCompensationArrangementByShareBasedPaymentAwardEquityInstrumentsOtherThanOptionsNonvestedNumber",
+             "PreferredStockSharesOutstanding", "ConvertibleNotesPayableCurrent", "ConvertibleNotesPayable",
+             "ConvertibleDebtCurrent", "ConvertibleDebtNoncurrent", "Revenues",
+             "RevenueFromContractWithCustomerExcludingAssessedTax", "NetIncomeLoss"]
+
+
+def facts_cached(cik) -> dict:
+    """SEC companyfacts 중 필요한 항목만 하루 캐시"""
+    if not cik:
+        return {}
+    c = cache_load("facts")
+    if cik not in c:
+        d = sec_get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json") or {}
+        g = d.get("facts", {}).get("us-gaap", {})
+        c[cik] = {"facts": {"us-gaap": {k: {"units": g[k].get("units", {})} for k in FACT_KEYS if k in g}}}
+    return c[cik]
+
+
+def profile_cached(t) -> dict:
+    c = cache_load("prof")
+    if t not in c:
+        try:
+            c[t] = report.profile(t, translate_ko)
+        except Exception as e:
+            log.warning("%s 프로필 실패: %s", t, e)
+            c[t] = {"inst": [], "insiders": []}
+    return c[t]
+
+
+def report_ai(rep: dict) -> str:
+    if not ANTHROPIC_KEY:
+        return ""
+    c = cache_load("rai")
+    key = rep["t"] + ":" + (rep["timeline"][0]["date"] if rep["timeline"] else "")
+    if key in c:
+        return c[key]
+    facts = {k: rep.get(k) for k in ("t", "name", "price", "mcap", "shares", "float", "growth", "spike", "baby",
+                                     "raises", "runway", "purposes", "events", "insiders", "inst")}
+    facts["dil"] = rep["dil"]["rows"]
+    facts["filings"] = [x["t"] for x in rep["timeline"][:15]]
+    prompt = ("미국 소형주 분석가로서 아래 SEC·시세 데이터만 근거로 '종합 판단'을 한국어 4~6문장으로 써라. "
+              "현금 조달·상장 유지·물량 출회 중 무엇이 핵심 목적인지, 펌핑 후 조달(희석) 시나리오, 확인이 필요한 공시를 "
+              "구체적 날짜·금액·가격으로 적어라. 데이터에 없는 사실은 지어내지 말고 '확인 필요'라고 써라. 매수 권유 금지.\n"
+              + json.dumps(_clean(facts), ensure_ascii=False, default=str)[:12000])
+    try:
+        r = http.post("https://api.anthropic.com/v1/messages", timeout=90,
+                      headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
+                               "content-type": "application/json"},
+                      json={"model": AI_MODEL, "max_tokens": 700, "messages": [{"role": "user", "content": prompt}]})
+        txt = "".join(b.get("text", "") for b in r.json().get("content", []))
+    except Exception as e:
+        log.warning("%s 리포트 AI 실패: %s", rep["t"], e)
+        txt = ""
+    c[key] = txt
+    return txt
+
+
+def write_reports(items, surge, jbc) -> list[str]:
+    by_t = {it["t"]: it for it in items}
+    pick = [it["t"] for it in items[:60]] + [it["t"] for it in items if it.get("watch")]
+    pick += [c["t"] for c in (surge or []) + (jbc or [])] + [d["t"] for d in DILUTION[:20]]
+    pick = [t for t in dict.fromkeys(pick) if t in by_t][:REPORT_MAX]
+    out_dir = OUT.parent / "r"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    done = []
+    for t in pick:
+        it = by_t[t]
+        try:
+            rep = report.build(it, PRICES.get(t), FS_ALL.get(t, []), facts_cached(it.get("cik")),
+                               profile_cached(t), CALENDAR, classify_filing)
+            ai = report_ai(rep)
+            if ai:
+                rep["verdict"], rep["ai"] = ai, True
+            (out_dir / f"{t}.json").write_text(json.dumps(_clean(rep), ensure_ascii=False, default=str),
+                                               encoding="utf-8")
+            done.append(t)
+        except Exception as e:
+            log.warning("%s 리포트 실패: %s", t, e)
+    tpl = ROOT / "report_template.html"
+    if tpl.exists():
+        (OUT.parent / "r.html").write_text(tpl.read_text(encoding="utf-8"), encoding="utf-8")
+    save_caches()
+    log.info("상세 리포트 %d개", len(done))
+    return done
 FEED: list = []
 DILUTION: list = []
 
@@ -1341,6 +1435,7 @@ def analyze() -> list[dict]:
         return [], [], []
     tickers = [u["t"] for u in uni]
     prices = daily_cached(tickers)
+    PRICES.update(prices)
     mins = intraday(tickers)
     log.info("일봉 %d · 1분봉 %d", len(prices), len(mins))
     frames = {t: tech_frame(df) for t, df in prices.items()}
@@ -1357,6 +1452,7 @@ def analyze() -> list[dict]:
             price = snap["price"] or u["price"] or 0
             cik = ciks.get(t)
             fs, fin = sec_cached(cik)
+            FS_ALL[t] = fs
             tags, ddays, raw = motive_tags(price, u["float"], fs, fin, df, today)
             stg = int(frames[t]["stage"].iloc[-1]) if t in frames else 0
             st = stats.get(stg, {})
@@ -1422,7 +1518,7 @@ def write_page(items: list[dict], surge=None, jbc=None) -> None:
     tpl = (ROOT / "dashboard_template.html").read_text(encoding="utf-8")
     payload = _clean({"updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"), "items": items,
                       "forward": FORWARD_DAYS, "surge": surge or [], "jbc": jbc or [],
-                      "cal": CALENDAR, "feed": FEED, "dil": DILUTION,
+                      "cal": CALENDAR, "dil": DILUTION, "reports": REPORTS,
                       "rules": {"reg": int(SURGE_REG * 100), "pre": int(SURGE_PRE * 100), "jb": int(JB_HIT * 100)}})
     data = json.dumps(payload, ensure_ascii=False, default=lambda o: None).replace("</", "<\\/")
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -1486,6 +1582,11 @@ def main():
     if not items:
         log.error("분석 결과 없음")
         return
+    global REPORTS
+    try:
+        REPORTS = write_reports(items, surge, jbc)
+    except Exception as e:
+        log.exception("리포트 생성 실패: %s", e)
     write_page(items, surge, jbc)
     telegram(items, surge, jbc)
 
