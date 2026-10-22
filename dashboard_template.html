@@ -104,6 +104,15 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .slist div{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line);font-size:12.5px}
 .slist div:last-child{border-bottom:0}
 .slist .sg{flex:0 0 auto}
+.prob{margin:0 12px 10px;border:1px solid var(--line);border-radius:12px;background:#0d1622;padding:8px 10px}
+.prob h6{margin:0 0 6px;font-size:11.5px;color:var(--muted);font-weight:600}
+.prob .pg{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.prob small{display:block;font-size:11px;color:var(--muted)}
+.prob b{font-family:var(--mono);font-size:20px}
+.prob .pb{height:5px;border-radius:3px;background:var(--panel2);margin:4px 0 3px;overflow:hidden}
+.prob .pb i{display:block;height:100%;border-radius:3px;background:var(--good)}
+.prob em{font-style:normal;font-size:10.5px;color:var(--muted)}
+.prob .act{display:inline-block;margin-top:2px;font-size:11px;font-weight:700}
 </style>
 </head>
 <body>
@@ -121,6 +130,8 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
       <option value="upside">상승 여력순</option>
       <option value="rsi">RSI 낮은순</option>
       <option value="relvol">오늘 거래량 급증순</option>
+      <option value="regp">본장 급등확률순</option>
+      <option value="prep">프리장 급등확률순</option>
       <option value="chg">오늘 등락률순</option>
     </select>
   </div>
@@ -157,6 +168,22 @@ function rangeBar(title, lo, hi, cur, mark, lbl){
   const p = pc(cur);
   return `<div class="rng"><h5>${title}</h5><div class="bar">${mark != null ? `<u style="left:${pc(mark)}%"></u>` : ""}<i class="${p < 8 ? 'lo' : ''}" style="left:${p}%"></i></div>
     <div class="rl"><span>${lbl[0]} ${pfmt(lo)}</span><span>${lbl[1].replace("{p}", p.toFixed(0))}</span><span>${lbl[2]} ${pfmt(hi)}</span></div></div>`;
+}
+function probBlock(it){
+  const p = it.prob;
+  if (!p || (p.reg == null && p.pre == null)) return "";
+  const one = (icon, label, v, base, n, th, act) => {
+    if (v == null) return `<div><small>${icon} ${label}</small><b>-</b><em>데이터 없음</em></div>`;
+    const lift = base ? (v / base) : null;
+    const col = lift == null ? "" : lift >= 2 ? "up" : lift < 1 ? "dn" : "";
+    const actTxt = act == null ? "" : `<span class="act ${act >= th ? 'up' : 'dn'}">실제 ${act >= 0 ? '+' : ''}${act}% ${act >= th ? '✅ 달성' : '❌ 미달'}</span>`;
+    return `<div><small>${icon} ${label} +${th}% 터치</small><b class="${col}">${v.toFixed(1)}%</b>
+      <div class="pb"><i style="width:${Math.min(100, v * 2)}%"></i></div>
+      <em>평균 ${base ?? "-"}%${lift ? " · " + lift.toFixed(1) + "배" : ""} · 유사 ${n.toLocaleString()}일</em>${actTxt}</div>`;
+  };
+  return `<div class="prob"><h6>📅 ${esc(p.date)} 급등 확률 · ${esc(p.basis)}</h6><div class="pg">
+    ${one("🌅", "프리장", p.pre, p.pre_base, p.n_pre, p.pre_th, p.pre_act)}
+    ${one("🔔", "본장", p.reg, p.reg_base, p.n_reg, p.reg_th, p.reg_act)}</div></div>`;
 }
 function snapBlock(it){
   const sn = it.snap || {}, s = sn.spark;
@@ -218,6 +245,7 @@ function card(it, i){
     </div>
     ${sigs ? `<div class="sigs">${sigs}</div>` : ""}
     <div class="tags">${tags || '<span class="tag">뚜렷한 동기 없음</span>'}</div>
+    ${probBlock(it)}
     <div class="plan">
       <div><small>참고 진입가</small><b>${usd(it.price)}</b></div>
       <div><small>유사군 예상 고점</small><b class="up">${it.target ? usd(it.target) : "-"}</b>${up>0?`<small>+${up.toFixed(0)}% · ${s.median.toFixed(2)}배</small>`:""}</div>
@@ -235,7 +263,7 @@ function card(it, i){
         <dt>자기자본</dt><dd>${big(it.equity)}</dd><dt>시가총액</dt><dd>${big(it.mcap)}</dd>${dd}</dl></div>
       <div class="sec"><h3>부양 동기 근거</h3><div class="note">${it.tags.map(t=>`• <b>${esc(t.name)}</b> ${esc(t.level)} ${esc(t.note||"")}`).join("<br>") || "-"}</div></div>
       <div class="sec"><h3>최근 공시 (SEC 원문)</h3><ul class="fl">${fl}</ul></div>
-      <div class="note">통합점수 = 부양 강도 45% + 차트 조건 35% + 유사 사례 +20% 도달률 20%. 순서를 정하는 점수이며 성공 확률이 아닙니다. 기한·런웨이는 공시 기준 추정치라 원문 확인이 필요합니다.</div>
+      <div class="note">통합점수 = 부양 강도 45% + 차트 조건 35% + 유사 사례 +20% 도달률 20%. 순서를 정하는 점수이며 성공 확률이 아닙니다. 급등 확률은 감시 종목들의 과거(본장 5년·프리장 2년) 중 전날 거래량 배수·등락률·주가대가 비슷했던 날 다음날 실제 터치 비율이며, 상장폐지된 종목은 빠져 있어 실제보다 높게 나올 수 있습니다. 기한·런웨이는 공시 기준 추정치라 원문 확인이 필요합니다.</div>
     </div>
   </article>`;
 }
@@ -250,6 +278,7 @@ function render(){
     total: it => -it.total, strength: it => -(it.strength*100 + it.total), stage: it => -(it.stage*100 + it.total),
     runway: it => it.runway == null ? 1e9 : it.runway, dday: it => { const d = nearest(it); return d ? d.d : 1e9; },
     upside: it => -upside(it), rsi: it => sn(it).rsi == null ? 1e9 : sn(it).rsi,
+    regp: it => -((it.prob && it.prob.reg) ?? -1), prep: it => -((it.prob && it.prob.pre) ?? -1),
     relvol: it => -(sn(it).relvol || 0), chg: it => -(sn(it).chg == null ? -1e9 : sn(it).chg)
   }[sort];
   xs.sort((a,b) => key(a) - key(b));

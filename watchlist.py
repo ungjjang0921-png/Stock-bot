@@ -21,7 +21,9 @@ import logging
 import math
 import os
 import time
+from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
+from datetime import time as dtime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -38,6 +40,11 @@ MIN_AVG_VOL = 100_000
 MAX_UNIVERSE = 400                # 평균 거래량 상위
 TODAY_TOP = 100                   # + 오늘 거래량 상위 (당일 급등주 포함용)
 FORWARD_DAYS = 60
+SURGE_REG = 0.20                  # 본장 급등 기준: 전일 종가 대비 고가 +20% 터치
+SURGE_PRE = 0.10                  # 프리장 급등 기준: 전일 종가 대비 프리장 고가 +10% 터치
+PRIOR_K = 20                      # 표본 적은 조건은 상위 조건 확률 쪽으로 보정
+HIST_PERIOD = "5y"                # 본장 확률 학습 기간 (일봉)
+PRE_PERIOD = "730d"               # 프리장 확률 학습 기간 (1시간봉 무료 한도 2년)
 TOP_TELEGRAM = 10
 AI_TOP = 10
 AI_MODEL = "claude-sonnet-5-5"
@@ -163,7 +170,7 @@ def _download(tickers: list[str], **kw) -> dict[str, pd.DataFrame]:
 
 
 def daily(tickers):
-    return {t: d for t, d in _download(tickers, period="1y", interval="1d", actions=True).items() if len(d) >= 30}
+    return {t: d for t, d in _download(tickers, period=HIST_PERIOD, interval="1d", actions=True).items() if len(d) >= 30}
 
 
 def intraday(tickers):
@@ -339,7 +346,7 @@ def motive_tags(price, fl, fs, fin, df, today):
         tag("병합", "안건 가능", f"{proxy['form']} {proxy['date']}"); raw += 1
     rs = 0
     if df is not None and "Stock Splits" in df:
-        sp = df["Stock Splits"]
+        sp = df["Stock Splits"].iloc[-252:]
         rs = int(((sp > 0) & (sp < 1)).sum())
     if rs:
         tag("병합 이력", f"{rs}회", "최근 1년")
@@ -351,6 +358,7 @@ def motive_tags(price, fl, fs, fin, df, today):
         tag("소형 유통", f"{fl / 1e6:.1f}M"); raw += 1
 
     if df is not None and len(df) > 30:
+        df = df.iloc[-60:]
         v, c = df["Volume"], df["Close"]
         avg = v.rolling(20).mean().shift(1)
         for i in range(len(df) - 10, len(df)):
@@ -402,6 +410,11 @@ def tech_frame(df: pd.DataFrame) -> pd.DataFrame:
     f["stage"] = f[["ma20", "lows", "upvol", "liq", "cool"]].sum(axis=1)
     f["fwd"] = df["High"][::-1].rolling(FORWARD_DAYS, min_periods=20).max()[::-1].shift(-1) / c
     f["rsi"] = rsi
+    # 급등 확률용: 그날 거래량 배수·등락률·종가 → 다음날 본장 고가가 +20% 터치했나
+    f["relvol"] = v / v.rolling(20).mean().shift(1)
+    f["chg"] = c.pct_change() * 100
+    f["close"] = c
+    f["yreg"] = (df["High"].shift(-1) / c - 1 >= SURGE_REG).astype(float).where(df["High"].shift(-1).notna())
     return f
 
 
@@ -444,12 +457,18 @@ def snapshot(u: dict, d: pd.DataFrame | None, m: pd.DataFrame | None) -> dict:
     if m is not None and len(m):
         price = float(m["Close"].iloc[-1])
         day = m.index[-1].date()
-        reg = m[m.index.time >= datetime.strptime("09:30", "%H:%M").time()]
+        reg = m[m.index.time >= dtime(9, 30)]
         s["open"] = float((reg if len(reg) else m)["Open"].iloc[0])
         s["day_hi"], s["day_lo"] = float(m["High"].max()), float(m["Low"].min())
         vol_day = float(m["Volume"].sum())
         tp = (m["High"] + m["Low"] + m["Close"]) / 3
         s["vwap"] = float((tp * m["Volume"]).sum() / max(vol_day, 1)) if vol_day else None
+        t_ = m.index.time
+        pre_m, reg_m = m[t_ < dtime(9, 30)], m[(t_ >= dtime(9, 30)) & (t_ < dtime(16, 0))]
+        s["pre_hi"] = float(pre_m["High"].max()) if len(pre_m) else None
+        s["reg_hi"] = float(reg_m["High"].max()) if len(reg_m) else None
+        s["reg_done"] = bool(len(reg_m)) and reg_m.index[-1].time() >= dtime(15, 55)
+        s["sdate"] = day.isoformat()
         r = rsi_series(m["Close"]).iloc[-1] if len(m) >= 20 else np.nan
         s["rsi_src"] = "1분봉"
     else:
@@ -469,7 +488,7 @@ def snapshot(u: dict, d: pd.DataFrame | None, m: pd.DataFrame | None) -> dict:
         before = d[[ts.date() < day for ts in d.index]]
         if len(before):
             prev = float(before["Close"].iloc[-1])
-        lo52, hi52 = float(d["Low"].min()), float(d["High"].max())
+        lo52, hi52 = float(d["Low"].iloc[-252:].min()), float(d["High"].iloc[-252:].max())
         if s["day_lo"]:
             lo52, hi52 = min(lo52, s["day_lo"]), max(hi52, s["day_hi"])
         s["lo52"], s["hi52"] = lo52, hi52
@@ -538,12 +557,131 @@ def snapshot(u: dict, d: pd.DataFrame | None, m: pd.DataFrame | None) -> dict:
             bits.append(f"회전율 {s['turnover']:.1f}배")
         add("변동성 주의", "org", ", ".join(bits))
 
-    for k in ("price", "open", "day_hi", "day_lo", "vwap", "prev", "lo52", "hi52", "bid", "ask"):
+    for k in ("price", "open", "day_hi", "day_lo", "vwap", "prev", "lo52", "hi52", "bid", "ask", "pre_hi", "reg_hi"):
         if k in s:
             s[k] = sig(s[k], 6)
     for k in ("chg", "spread", "turnover", "relvol"):
         s[k] = rnd(s.get(k), 2)
     return s
+
+
+# ───────────────── 5-2. 금일 프리장·본장 급등 확률 (과거 실제 빈도) ─────────────────
+RV_EDGES = [1.5, 3, 10]                 # 전날 거래량 배수 구간
+CH_EDGES = [-10, -3, 3, 10, 30]         # 전날 등락률 구간
+PX_EDGES = [0.5, 1]                     # 주가 구간
+WEEK = "월화수목금토일"
+
+
+def fkeys(relvol, chg, close) -> list[tuple]:
+    rv = int(np.searchsorted(RV_EDGES, relvol, side="right")) if relvol == relvol else -1
+    ch = int(np.searchsorted(CH_EDGES, chg, side="right")) if chg == chg else -1
+    px = int(np.searchsorted(PX_EDGES, close, side="right"))
+    return [(), (rv,), (rv, ch), (rv, ch, px)]          # 넓은 조건 → 좁은 조건
+
+
+class Rate:
+    """조건별 '다음날 급등' 실제 빈도. 표본 적은 조건은 상위 조건 쪽으로 보정"""
+    def __init__(self):
+        self.c = defaultdict(lambda: [0, 0])
+
+    def add(self, ks, y):
+        for k in ks:
+            self.c[k][0] += 1
+            self.c[k][1] += y
+
+    @property
+    def base(self):
+        n, h = self.c[()]
+        return h / n if n else None
+
+    def p(self, ks):
+        p, used = self.base, self.c[()][0]
+        if p is None:
+            return None, 0
+        for k in ks[1:]:
+            if k in self.c:
+                n, h = self.c[k]
+                p = (h + PRIOR_K * p) / (n + PRIOR_K)
+                used = n
+        return p, used
+
+
+def target_session() -> date:
+    """확률을 낼 '오늘 장' 날짜 (뉴욕 기준). 장 마감 후·주말이면 다음 거래일"""
+    now = datetime.now(ET)
+    d = now.date()
+    if now.weekday() >= 5 or now.time() >= dtime(16, 0):
+        d += timedelta(days=1)
+        while d.weekday() >= 5:
+            d += timedelta(days=1)
+    return d
+
+
+def premarket_highs(tickers) -> dict[str, pd.Series]:
+    """최근 2년 1시간봉 → 날짜별 프리장(4:00~9:30) 고가"""
+    out = {}
+    for t, h in _download(tickers, period=PRE_PERIOD, interval="1h", prepost=True).items():
+        try:
+            idx = h.index.tz_convert(ET) if h.index.tz is not None else h.index.tz_localize("UTC").tz_convert(ET)
+            h = h.set_axis(idx)
+            pre = h[h.index.time < dtime(9, 30)]
+            if len(pre):
+                out[t] = pre["High"].groupby(pre.index.date).max()
+        except Exception:
+            continue
+    return out
+
+
+def build_models(frames, pre_hi, target):
+    reg, pre = Rate(), Rate()
+    for t, f in frames.items():
+        tr = f[f.index.date < target].iloc[:-1]          # 결과가 확정된 날만 학습
+        tr = tr.dropna(subset=["relvol", "chg", "yreg"])
+        for r in tr[["relvol", "chg", "close", "yreg"]].itertuples(index=False):
+            reg.add(fkeys(r.relvol, r.chg, r.close), int(r.yreg))
+        ph = pre_hi.get(t)
+        if ph is None or not len(f):
+            continue
+        d64 = f.index.values.astype("datetime64[D]")
+        for D, hi in ph.items():
+            if D >= target:
+                continue
+            i = int(np.searchsorted(d64, np.datetime64(D))) - 1   # D 전날 행
+            if i < 1:
+                continue
+            row = f.iloc[i]
+            if row["relvol"] != row["relvol"] or not row["close"]:
+                continue
+            pre.add(fkeys(row["relvol"], row["chg"], row["close"]), int(hi / row["close"] - 1 >= SURGE_PRE))
+    log.info("확률 학습: 본장 %d일 · 프리장 %d일", reg.c[()][0], pre.c[()][0])
+    return reg, pre
+
+
+def predict(f, reg, pre, target, snap) -> dict | None:
+    if f is None:
+        return None
+    rows = f[f.index.date < target]
+    if not len(rows):
+        return None
+    r = rows.iloc[-1]
+    ks = fkeys(r["relvol"], r["chg"], r["close"])
+    pr, nr = reg.p(ks)
+    pp, np_ = pre.p(ks)
+    out = {"date": f"{target.month}/{target.day}({WEEK[target.weekday()]})",
+           "reg": None if pr is None else round(pr * 100, 1), "n_reg": nr,
+           "reg_base": None if reg.base is None else round(reg.base * 100, 1),
+           "pre": None if pp is None else round(pp * 100, 1), "n_pre": np_,
+           "pre_base": None if pre.base is None else round(pre.base * 100, 1),
+           "reg_th": int(SURGE_REG * 100), "pre_th": int(SURGE_PRE * 100),
+           "basis": f"전일 거래량 {r['relvol']:.1f}배 · 등락 {r['chg']:+.1f}%" if r["relvol"] == r["relvol"] else ""}
+    # 이미 지난 장은 실제 결과 표시
+    prev = float(r["close"])
+    if snap.get("sdate") == target.isoformat() and prev:
+        if snap.get("pre_hi") and datetime.now(ET).time() >= dtime(9, 30):
+            out["pre_act"] = round((snap["pre_hi"] / prev - 1) * 100, 1)
+        if snap.get("reg_hi") and snap.get("reg_done"):
+            out["reg_act"] = round((snap["reg_hi"] / prev - 1) * 100, 1)
+    return out
 
 
 # ───────────────── 6. AI 종합판단 (선택) ─────────────────
@@ -584,6 +722,8 @@ def analyze() -> list[dict]:
     log.info("일봉 %d · 1분봉 %d", len(prices), len(mins))
     frames = {t: tech_frame(df) for t, df in prices.items()}
     stats = similar_stats(frames)
+    target = target_session()
+    reg_m, pre_m = build_models(frames, premarket_highs(tickers), target)
     ciks = cik_map()
     items = []
     for u in uni:
@@ -611,7 +751,7 @@ def analyze() -> list[dict]:
                 "checks": {k: bool(frames[t][k].iloc[-1]) for k in ("ma20", "lows", "upvol", "liq", "cool")}
                 if t in frames else {},
                 "similar": st, "target": price * mult if mult and mult > 1.02 else None, "stop": stop, "total": total,
-                "snap": snap,
+                "snap": snap, "prob": predict(frames.get(t), reg_m, pre_m, target, snap),
                 "filings": [dict(f, ko=FORM_KO.get(f"{f['form']}:{f['items'][:4]}" if f["form"] == "8-K"
                                                    else f["form"], "")) for f in fs if f["form"] in FILING_FORMS][:20],
                 "ai": "",
@@ -666,6 +806,13 @@ def telegram(items: list[dict]) -> None:
         p = f"{it['price']:.3f}" if it["price"] < 1 else f"{it['price']:.2f}"
         rows.append(f"{i:<2} {it['t']:<5} {p:>6} {it['strength']}/5 {it['stage']}/5 {it['total']:>4.0f}")
     body = "\n".join(["#  티커    주가 강도 차트 통합", "─" * 30] + rows)
+    pr = sorted([it for it in items if it.get("prob") and it["prob"].get("reg") is not None],
+                key=lambda it: it["prob"]["reg"], reverse=True)[:5]
+    if pr:
+        p0 = pr[0]["prob"]
+        prow = [f"{it['t']:<5} {it['prob']['pre'] or 0:>5.1f}% {it['prob']['reg']:>5.1f}%" for it in pr]
+        body += ("\n\n" + f"{p0['date']} 급등확률 TOP5\n티커   프리+{p0['pre_th']}% 본장+{p0['reg_th']}%\n"
+                 + "─" * 26 + "\n" + "\n".join(prow) + f"\n평균   {p0['pre_base'] or 0:>5.1f}% {p0['reg_base'] or 0:>5.1f}%")
     link = f'\n\n📊 <a href="{PAGES_URL}">전체 대시보드 보기</a>' if PAGES_URL else ""
     text = (f"🎯 <b>펌핑 목적 워치리스트</b> ({datetime.now(KST):%m/%d %H:%M})\n"
             f"<pre>{html.escape(body)}</pre>강도: 부양 동기 · 차트: 진입 조건{link}\n⚠️ 확률 아님 · 투자 판단은 본인 책임")
