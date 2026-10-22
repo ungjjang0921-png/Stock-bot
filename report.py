@@ -48,14 +48,15 @@ def big(v):
 
 
 # ───────────────── SEC XBRL ─────────────────
-def fact(cf: dict, names: list[str], units=("USD", "shares", "USD/shares")) -> dict | None:
+def fact(cf: dict, names: list[str], units=("USD", "shares", "USD/shares"), max_age: int | None = None) -> dict | None:
     facts = (cf or {}).get("facts", {})
+    limit = (date.today() - timedelta(days=max_age)).isoformat() if max_age else ""
     for n in names:
         f = facts.get("us-gaap", {}).get(n) or facts.get("dei", {}).get(n)
         if not f:
             continue
         for u in units:
-            pts = [p for p in f.get("units", {}).get(u, []) if "end" in p]
+            pts = [p for p in f.get("units", {}).get(u, []) if "end" in p and p["end"] >= limit]
             if pts:
                 p = max(pts, key=lambda p: (p["end"], p.get("filed", "")))
                 return {"val": p["val"], "end": p["end"], "start": p.get("start"), "form": p.get("form", "")}
@@ -79,25 +80,25 @@ def dilutive(cf: dict, price: float) -> dict:
         rows.append({"kind": kind, "holder": holder, "qty": qty, "px": px, "px_pct": pct(px, price) if px else None,
                      "st": st, "note": note})
 
-    w = fact(cf, ["ClassOfWarrantOrRightOutstanding"], ("shares",))
+    w = fact(cf, ["ClassOfWarrantOrRightOutstanding"], ("shares",), max_age=730)
     wp = fact(cf, ["ClassOfWarrantOrRightExercisePriceOfWarrantsOrRights1",
-                   "ClassOfWarrantOrRightExercisePriceOfWarrantsOrRights"], ("USD/shares",))
+                   "ClassOfWarrantOrRightExercisePriceOfWarrantsOrRights"], ("USD/shares",), max_age=730)
     if w:
         add("워런트", "투자자", w["val"], wp["val"] if wp else None, f"{w['end']} 기준 (여러 종류면 합계·대표 행사가)")
-    o = fact(cf, ["ShareBasedCompensationArrangementByShareBasedPaymentAwardOptionsOutstandingNumber"], ("shares",))
+    o = fact(cf, ["ShareBasedCompensationArrangementByShareBasedPaymentAwardOptionsOutstandingNumber"], ("shares",), max_age=730)
     op = fact(cf, ["ShareBasedCompensationArrangementByShareBasedPaymentAwardOptionsOutstandingWeightedAverageExercisePrice"],
-              ("USD/shares",))
+              ("USD/shares",), max_age=730)
     if o:
         add("옵션", "임원·직원", o["val"], op["val"] if op else None, f"{o['end']} 기준 · 가중평균 행사가")
     r = fact(cf, ["ShareBasedCompensationArrangementByShareBasedPaymentAwardEquityInstrumentsOtherThanOptionsNonvestedNumber"],
-             ("shares",))
+             ("shares",), max_age=730)
     if r:
         add("RSU", "임원·직원", r["val"], 0.0, f"{r['end']} 기준 · 미확정분")
-    pf = fact(cf, ["PreferredStockSharesOutstanding"], ("shares",))
+    pf = fact(cf, ["PreferredStockSharesOutstanding"], ("shares",), max_age=730)
     if pf and pf["val"]:
         add("우선주", "투자자", pf["val"], None, f"{pf['end']} 기준 · 전환 조건은 원문 확인")
     cv = fact(cf, ["ConvertibleNotesPayableCurrent", "ConvertibleNotesPayable", "ConvertibleDebtCurrent",
-                   "ConvertibleDebtNoncurrent"], ("USD",))
+                   "ConvertibleDebtNoncurrent"], ("USD",), max_age=730)
     conv = cv["val"] if cv and cv["val"] else None
     total = sum(x["qty"] for x in rows)
     now = sum(x["qty"] for x in rows if x["st"] == "출회 가능")
@@ -181,8 +182,8 @@ def build(it: dict, df: pd.DataFrame | None, fs: list[dict], cf: dict, prof: dic
 
     # 1. 회사
     spark = [round(float(x), 6) for x in df["Close"].iloc[-60:]] if df is not None else []
-    rev = fact(cf, ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"], ("USD",))
-    ni = fact(cf, ["NetIncomeLoss"], ("USD",))
+    rev = fact(cf, ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"], ("USD",), max_age=550)
+    ni = fact(cf, ["NetIncomeLoss"], ("USD",), max_age=550)
     sp = spike(df, fl, fs)
     insider_buys = sum(1 for x in prof.get("insiders", []) if "매수" in x["act"])
     signals = []

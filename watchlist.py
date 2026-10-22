@@ -797,13 +797,29 @@ def fetch_news(t: str, hours: int = 48) -> list[dict]:
     return out
 
 
+HANGUL = re.compile(r"[가-힣]")
+
+
 def translate_ko(text: str) -> str:
-    try:
-        r = http.get("https://translate.googleapis.com/translate_a/single", timeout=8,
-                     params={"client": "gtx", "sl": "en", "tl": "ko", "dt": "t", "q": text})
-        return "".join(x[0] for x in r.json()[0] if x and x[0]) or text
-    except Exception:
+    """구글 번역 → 실패하면 Groq/Claude 로 번역 → 그래도 실패하면 원문"""
+    if not text or HANGUL.search(text):
         return text
+    for attempt in range(2):
+        try:
+            r = http.post("https://translate.googleapis.com/translate_a/single", timeout=10,
+                          params={"client": "gtx", "sl": "auto", "tl": "ko", "dt": "t"},
+                          data={"q": text}, headers=UA_WEB)
+            out = "".join(x[0] for x in r.json()[0] if x and x[0])
+            if HANGUL.search(out):
+                return out
+        except Exception as e:
+            log.debug("구글 번역 실패: %s", e)
+        time.sleep(1)
+    if len(text) > 80 and (ANTHROPIC_KEY or GROQ_KEY):
+        out = llm("다음 영어 회사 소개를 자연스러운 한국어 2~3문장으로 번역해. 번역문만 출력해.\n\n" + text, 400)
+        if HANGUL.search(out or ""):
+            return out
+    return text
 
 
 def short_info(t: str) -> dict:
@@ -1249,6 +1265,9 @@ def facts_cached(cik) -> dict:
 
 def profile_cached(t) -> dict:
     c = cache_load("prof")
+    p = c.get(t)
+    if p and p.get("summary_ko") and not HANGUL.search(p["summary_ko"]):
+        p["summary_ko"] = translate_ko(p["summary_ko"])        # 지난번 번역 실패분 재시도
     if t not in c:
         try:
             c[t] = report.profile(t, translate_ko)
