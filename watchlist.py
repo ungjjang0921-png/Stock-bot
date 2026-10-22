@@ -20,6 +20,8 @@ import json
 import logging
 import math
 import os
+import pickle
+import re
 import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -44,8 +46,11 @@ SURGE_REG = 0.20                  # 본장 급등 기준: 전일 종가 대비 �
 SURGE_PRE = 0.10                  # 프리장 급등 기준: 전일 종가 대비 프리장 고가 +10% 터치
 PRIOR_K = 20                      # 표본 적은 조건은 상위 조건 확률 쪽으로 보정
 HIST_PERIOD = "5y"                # 본장 확률 학습 기간 (일봉)
-PRE_PERIOD = "700d"               # 프리장 확률 학습 기간 (1시간봉 무료 한도 2년)
+PRE_PERIOD = "700d"               # 프리장 확률 학습 기간 (1시간봉 무료 한도 730일보다 살짝 짧게)
 TOP_TELEGRAM = 10
+SURGE_TOP = 8                     # 금일 급등 후보 개수
+JB_TOP = 8                        # 종배 예상 개수
+JB_HIT = 0.10                     # 종배 성공 기준: 다음날 고가 +10% 터치
 AI_TOP = 10
 AI_MODEL = "claude-sonnet-5-5"
 
@@ -55,6 +60,7 @@ PAGES_URL = os.getenv("PAGES_URL", "").strip()
 ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 ROOT = Path(__file__).parent
 OUT = ROOT / "docs" / "index.html"
+CACHE = ROOT / ".cache"            # 하루 한 번 받는 큰 데이터 (GitHub actions/cache 로 보관)
 KST = ZoneInfo("Asia/Seoul")
 ET = ZoneInfo("America/New_York")
 # ═══════════════════════════════════════════════
@@ -415,6 +421,11 @@ def tech_frame(df: pd.DataFrame) -> pd.DataFrame:
     f["chg"] = c.pct_change() * 100
     f["close"] = c
     f["yreg"] = (df["High"].shift(-1) / c - 1 >= SURGE_REG).astype(float).where(df["High"].shift(-1).notna())
+    f["greg"] = df["High"].shift(-1) / c - 1            # 다음날 고가 상승률
+    f["gap"] = df["Open"].shift(-1) / c - 1             # 다음날 시가 갭
+    rng = (df["High"] - df["Low"]).replace(0, np.nan)
+    f["cp"] = ((c - df["Low"]) / rng).fillna(0.5)        # 종가가 그날 범위 어디서 끝났나 (1=고가 마감)
+    f["high"], f["low"] = df["High"], df["Low"]
     return f
 
 
@@ -468,6 +479,10 @@ def snapshot(u: dict, d: pd.DataFrame | None, m: pd.DataFrame | None) -> dict:
         s["pre_hi"] = float(pre_m["High"].max()) if len(pre_m) else None
         s["reg_hi"] = float(reg_m["High"].max()) if len(reg_m) else None
         s["reg_done"] = bool(len(reg_m)) and reg_m.index[-1].time() >= dtime(15, 55)
+        if len(reg_m):
+            s["reg_last"], s["reg_lo"] = float(reg_m["Close"].iloc[-1]), float(reg_m["Low"].min())
+            s["reg_vol"] = float(reg_m["Volume"].sum())
+            s["reg_time"] = reg_m.index[-1].astimezone(KST).strftime("%H:%M")
         s["sdate"] = day.isoformat()
         r = rsi_series(m["Close"]).iloc[-1] if len(m) >= 20 else np.nan
         s["rsi_src"] = "1분봉"
@@ -557,7 +572,8 @@ def snapshot(u: dict, d: pd.DataFrame | None, m: pd.DataFrame | None) -> dict:
             bits.append(f"회전율 {s['turnover']:.1f}배")
         add("변동성 주의", "org", ", ".join(bits))
 
-    for k in ("price", "open", "day_hi", "day_lo", "vwap", "prev", "lo52", "hi52", "bid", "ask", "pre_hi", "reg_hi"):
+    for k in ("price", "open", "day_hi", "day_lo", "vwap", "prev", "lo52", "hi52", "bid", "ask", "pre_hi", "reg_hi",
+              "reg_last", "reg_lo"):
         if k in s:
             s[k] = sig(s[k], 6)
     for k in ("chg", "spread", "turnover", "relvol"):
@@ -579,19 +595,37 @@ def fkeys(relvol, chg, close) -> list[tuple]:
     return [(), (rv,), (rv, ch), (rv, ch, px)]          # 넓은 조건 → 좁은 조건
 
 
-class Rate:
-    """조건별 '다음날 급등' 실제 빈도. 표본 적은 조건은 상위 조건 쪽으로 보정"""
-    def __init__(self):
-        self.c = defaultdict(lambda: [0, 0])
+def jbkeys(relvol, chg, close, cp) -> list[tuple]:
+    """종배용: 오늘 거래량·등락·종가 위치(고가 마감인지)·주가대"""
+    k = fkeys(relvol, chg, close)
+    cb = 0 if cp < 0.3 else 1 if cp < 0.7 else 2
+    return [(), ("j",) + k[1], ("j",) + k[2], ("j",) + k[2] + (cb,), ("j",) + k[3] + (cb,)]
 
-    def add(self, ks, y):
+
+class Rate:
+    """조건별 '다음날 급등' 실제 빈도. 표본 적은 조건은 상위 조건 쪽으로 보정
+    c[key] = [표본수, 적중수, 고가상승합, 적중시 고가상승합, 갭상승수, 갭합]"""
+    def __init__(self):
+        self.c = defaultdict(lambda: [0, 0, 0.0, 0.0, 0, 0.0])
+
+    def add(self, ks, y, g=0.0, up=0, gap=0.0):
+        g, gap = max(-0.9, min(g, 3.0)), max(-0.9, min(gap, 3.0))
         for k in ks:
-            self.c[k][0] += 1
-            self.c[k][1] += y
+            c = self.c[k]
+            c[0] += 1; c[1] += y; c[2] += g; c[3] += g if y else 0.0; c[4] += up; c[5] += gap
+
+    def stats(self, ks, min_n=30) -> dict:
+        """가장 좁은 조건(표본 30 이상)의 평균 고가 상승·터졌을 때 평균·갭상승 비율"""
+        for k in reversed(ks):
+            if k in self.c and self.c[k][0] >= min_n:
+                n, h, sg, sgh, up, gap = self.c[k]
+                return {"avg_hi": round(sg / n * 100, 1), "hit_hi": round(sgh / h * 100, 1) if h else None,
+                        "up": round(up / n * 100, 1), "gap": round(gap / n * 100, 2), "n": n}
+        return {}
 
     @property
     def base(self):
-        n, h = self.c[()]
+        n, h = self.c[()][:2]
         return h / n if n else None
 
     def p(self, ks):
@@ -600,7 +634,7 @@ class Rate:
             return None, 0
         for k in ks[1:]:
             if k in self.c:
-                n, h = self.c[k]
+                n, h = self.c[k][:2]
                 p = (h + PRIOR_K * p) / (n + PRIOR_K)
                 used = n
         return p, used
@@ -633,12 +667,13 @@ def premarket_highs(tickers) -> dict[str, pd.Series]:
 
 
 def build_models(frames, pre_hi, target):
-    reg, pre = Rate(), Rate()
+    reg, pre, jb = Rate(), Rate(), Rate()
     for t, f in frames.items():
         tr = f[f.index.date < target].iloc[:-1]          # 결과가 확정된 날만 학습
-        tr = tr.dropna(subset=["relvol", "chg", "yreg"])
-        for r in tr[["relvol", "chg", "close", "yreg"]].itertuples(index=False):
-            reg.add(fkeys(r.relvol, r.chg, r.close), int(r.yreg))
+        tr = tr.dropna(subset=["relvol", "chg", "yreg", "greg", "gap"])
+        for r in tr[["relvol", "chg", "close", "yreg", "greg", "gap", "cp"]].itertuples(index=False):
+            reg.add(fkeys(r.relvol, r.chg, r.close), int(r.yreg), r.greg)
+            jb.add(jbkeys(r.relvol, r.chg, r.close, r.cp), int(r.greg >= JB_HIT), r.greg, int(r.gap > 0), r.gap)
         ph = pre_hi.get(t)
         if ph is None or not len(f):
             continue
@@ -652,9 +687,10 @@ def build_models(frames, pre_hi, target):
             row = f.iloc[i]
             if row["relvol"] != row["relvol"] or not row["close"]:
                 continue
-            pre.add(fkeys(row["relvol"], row["chg"], row["close"]), int(hi / row["close"] - 1 >= SURGE_PRE))
-    log.info("확률 학습: 본장 %d일 · 프리장 %d일", reg.c[()][0], pre.c[()][0])
-    return reg, pre
+            pre.add(fkeys(row["relvol"], row["chg"], row["close"]), int(hi / row["close"] - 1 >= SURGE_PRE),
+                    hi / row["close"] - 1)
+    log.info("확률 학습: 본장 %d일 · 프리장 %d일 · 종배 %d일", reg.c[()][0], pre.c[()][0], jb.c[()][0])
+    return reg, pre, jb
 
 
 def predict(f, reg, pre, target, snap) -> dict | None:
@@ -673,7 +709,10 @@ def predict(f, reg, pre, target, snap) -> dict | None:
            "pre": None if pp is None else round(pp * 100, 1), "n_pre": np_,
            "pre_base": None if pre.base is None else round(pre.base * 100, 1),
            "reg_th": int(SURGE_REG * 100), "pre_th": int(SURGE_PRE * 100),
-           "basis": f"전일 거래량 {r['relvol']:.1f}배 · 등락 {r['chg']:+.1f}%" if r["relvol"] == r["relvol"] else ""}
+           "basis": f"전일 거래량 {r['relvol']:.1f}배 · 등락 {r['chg']:+.1f}%" if r["relvol"] == r["relvol"] else "",
+           "reg_st": reg.stats(ks), "pre_st": pre.stats(ks),
+           "ref": float(r["close"]), "ref_hi": float(r["high"]), "relvol": num(r["relvol"]), "pchg": num(r["chg"]),
+           "cp": num(r["cp"])}
     # 이미 지난 장은 실제 결과 표시
     prev = float(r["close"])
     if snap.get("sdate") == target.isoformat() and prev:
@@ -682,6 +721,292 @@ def predict(f, reg, pre, target, snap) -> dict | None:
         if snap.get("reg_hi") and snap.get("reg_done"):
             out["reg_act"] = round((snap["reg_hi"] / prev - 1) * 100, 1)
     return out
+
+
+# ───────────────── 5-3. 금일 급등 후보 · 종배 예상 (원인 분석 + 시나리오) ─────────────────
+POS_WORDS = ["beat", "beats", "tops", "surpass", "raises guidance", "raised guidance", "upgrade", "record",
+             "approval", "approved", "approves", "clearance", "partnership", "collaboration", "contract",
+             "awarded", "buyback", "repurchase", "breakthrough", "positive", "acquire", "acquisition of",
+             "to be acquired", "merger", "strategic", "launches", "expands", "patent", "grant", "milestone",
+             "agreement", "order", "wins", "ai ", "bitcoin", "crypto", "treasury"]
+NEG_WORDS = ["miss", "misses", "cuts guidance", "lowers guidance", "downgrade", "lawsuit", "probe",
+             "investigation", "subpoena", "recall", "offering", "dilution", "priced", "registered direct",
+             "private placement", "warrant", "bankruptcy", "chapter 11", "delist", "going concern",
+             "reverse split", "reverse stock split", "default", "layoff", "halt", "fraud", "resigns", "fails"]
+DILUTE = ["offering", "registered direct", "private placement", "warrant", "at-the-market", "priced", "shelf"]
+
+
+def _hit(text, words):
+    return sum(1 for w in words if w in text)
+
+
+def fetch_news(t: str, hours: int = 48) -> list[dict]:
+    try:
+        raw = yf.Ticker(t).news or []
+    except Exception:
+        return []
+    now, out = datetime.now(timezone.utc), []
+    for it in raw:
+        try:
+            c = it.get("content") or it
+            title = c.get("title") or ""
+            if c.get("pubDate"):
+                ts = datetime.fromisoformat(c["pubDate"].replace("Z", "+00:00"))
+            elif it.get("providerPublishTime"):
+                ts = datetime.fromtimestamp(it["providerPublishTime"], timezone.utc)
+            else:
+                continue
+            if not title or now - ts > timedelta(hours=hours):
+                continue
+            link = ((c.get("canonicalUrl") or {}).get("url") or (c.get("clickThroughUrl") or {}).get("url")
+                    or c.get("link") or "")
+            text = (title + " " + (c.get("summary") or "")).lower()
+            p, n = _hit(text, POS_WORDS), _hit(text, NEG_WORDS)
+            out.append({"title": title, "link": link, "ts": ts, "when": ts.astimezone(KST).strftime("%m/%d %H:%M"),
+                        "pub": (c.get("provider") or {}).get("displayName") or c.get("publisher") or "",
+                        "s": "호재" if p > n else "악재" if n > p else "중립", "dilute": _hit(text, DILUTE) > 0})
+        except Exception:
+            continue
+    out.sort(key=lambda x: x["ts"], reverse=True)
+    return out
+
+
+def translate_ko(text: str) -> str:
+    try:
+        r = http.get("https://translate.googleapis.com/translate_a/single", timeout=8,
+                     params={"client": "gtx", "sl": "en", "tl": "ko", "dt": "t", "q": text})
+        return "".join(x[0] for x in r.json()[0] if x and x[0]) or text
+    except Exception:
+        return text
+
+
+def short_info(t: str) -> dict:
+    try:
+        i = yf.Ticker(t).info or {}
+    except Exception:
+        return {}
+    si = num(i.get("shortPercentOfFloat"))
+    d = i.get("dateShortInterest")
+    return {"si": None if si is None else si * 100, "dtc": num(i.get("shortRatio")),
+            "short": num(i.get("sharesShort")), "short_prev": num(i.get("sharesShortPriorMonth")),
+            "si_date": datetime.fromtimestamp(d, timezone.utc).strftime("%m/%d") if d else None}
+
+
+def enrich(t: str) -> dict:
+    news = fetch_news(t)
+    for n in news[:3]:
+        n["ko"] = translate_ko(n["title"])
+    return {"news": [{k: n.get(k) for k in ("ko", "title", "link", "when", "pub", "s", "dilute")} for n in news[:3]],
+            "pos": sum(n["s"] == "호재" for n in news), "neg": sum(n["s"] == "악재" for n in news),
+            "dilute_news": any(n["dilute"] for n in news), **short_info(t)}
+
+
+def resistances(df: pd.DataFrame | None, ref: float) -> list[float]:
+    if df is None or not ref:
+        return []
+    hs = sorted(set(round(float(x), 6) for x in df["High"].iloc[-126:] if x > ref * 1.08))
+    out = []
+    for h in hs:
+        if not out or h > out[-1] * 1.10:
+            out.append(h)
+        if len(out) == 2:
+            break
+    return out
+
+
+def P(v):
+    return "-" if v is None else (f"${v:.4f}" if v < 1 else f"${v:.2f}")
+
+
+def pct(a, b):
+    return f"{(a / b - 1) * 100:+.0f}%" if a and b else ""
+
+
+RISK_TAGS = {"공모 준비": 8, "ATM·공모": 8, "물량 출회": 8, "병합": 4, "공시 지연": 5}
+
+
+def drivers_for(it: dict, ex: dict, today_side: bool) -> tuple[list, list]:
+    """→ ([(유형, 점수, 근거)], [(리스크, 감점)])"""
+    sn, p, tags = it.get("snap") or {}, it.get("prob") or {}, {t["name"]: t for t in it["tags"]}
+    d, r = [], []
+    j = it.get("jb") or {}
+    relvol = p.get("relvol") if not today_side else j.get("relvol")
+    chg = p.get("pchg") if not today_side else j.get("chg")
+    if ex.get("pos"):
+        n0 = next((n for n in ex.get("news", []) if n["s"] == "호재"), None)
+        d.append(("호재 뉴스형", 16, f"호재 {ex['pos']}건" + (f": {n0['ko'][:40]}" if n0 and n0.get("ko") else "")))
+    si = ex.get("si")
+    if si and si >= 10:
+        pts = 16 if si >= 20 else 9
+        ev = f"공매도 유통 대비 {si:.0f}%"
+        if ex.get("dtc"):
+            ev += f" · 커버 {ex['dtc']:.1f}일"
+            pts += 3 if ex["dtc"] >= 3 else 0
+        if ex.get("short") and ex.get("short_prev") and ex["short"] > ex["short_prev"] * 1.1:
+            ev += " · 공매도 증가"
+            pts += 2
+        if chg and chg > 5:
+            pts += 3
+            ev += " · 주가 상승 중(숏커버 압력)"
+        d.append(("숏스퀴즈형", pts, ev + (f" ({ex['si_date']} 기준)" if ex.get("si_date") else "")))
+    fl = it.get("float")
+    if fl and fl < 10e6 and relvol and relvol >= 3:
+        d.append(("저유통 모멘텀형", 11, f"유통 {fl / 1e6:.1f}M주 · 거래량 {relvol:.1f}배"))
+    cpv = j.get("cp") if today_side else p.get("cp")
+    if not today_side and chg is not None and chg >= 20 and (cpv if cpv is not None else 0.8) >= 0.7 and (relvol or 0) >= 2:
+        d.append(("전일 강세 연속형", 10, f"{chg:+.0f}% · 고가권 마감 · 거래량 {relvol:.1f}배"))
+    if "상장 유지" in tags and tags["상장 유지"]["level"] in ("기한형", "필요"):
+        dd = next((x for x in it.get("ddays", []) if "회복" in x["label"]), None)
+        d.append(("상장유지 부양형", 7, "$1 미달 통지" + (f" · 기한 D-{dd['d']}" if dd else "")))
+    if "매집 의심" in tags:
+        d.append(("매집형", 7, f"거래량 {tags['매집 의심']['level']} 폭증 후 가격 눌림"))
+    keys = sn.get("keys") or []
+    if ("과매도" in keys or "신저가" in keys) or (chg is not None and chg <= -15):
+        d.append(("과매도 반등형", 6, f"{'과매도·' if '과매도' in keys else ''}{'신저가·' if '신저가' in keys else ''}등락 {chg:+.0f}%"
+                  if chg is not None else "과매도"))
+    for name, pts in RISK_TAGS.items():
+        if name in tags:
+            r.append((f"{name}({tags[name]['level']})", pts))
+    if ex.get("dilute_news"):
+        r.append(("증자·워런트 뉴스", 12))
+    if "현금 조달" in tags and tags["현금 조달"]["level"] == "급함":
+        r.append((f"현금 고갈({tags['현금 조달']['note']})", 5))
+    if "고점 대비 밀림" in keys:
+        r.append(("고점 대비 밀림", 5))
+    if ex.get("neg"):
+        r.append((f"악재 뉴스 {ex['neg']}건", 6))
+    d.sort(key=lambda x: -x[1])
+    return d, r
+
+
+def surge_scenario(it, d, r, df) -> list[dict]:
+    p, ex = it["prob"], it.get("ex", {})
+    ref, ref_hi = p["ref"], p["ref_hi"]
+    typ = d[0][0] if d else "확률형"
+    st = p.get("reg_st") or {}
+    hit = st.get("hit_hi")
+    res = resistances(df, ref)
+    t1 = res[0] if res else ref * (1 + SURGE_REG)
+    t2 = res[1] if len(res) > 1 else (ref * (1 + hit / 100) if hit else t1 * 1.2)
+    why = {"숏스퀴즈형": "숏커버링이 붙으며 매물 공백 구간 가속", "호재 뉴스형": "재료 확산으로 신규 매수 유입",
+           "저유통 모멘텀형": "적은 유통 물량에 매수 몰리며 슈팅", "전일 강세 연속형": "어제 강세 흐름 이어 추가 상승",
+           "상장유지 부양형": "$1 회복을 노린 부양성 매수", "매집형": "매집 물량이 슈팅 구간 진입",
+           "과매도 반등형": "낙폭 과대 구간에서 기술적 반등"}.get(typ, "거래량 유입 시 단기 급등")
+    lines = [{"k": "근거", "t": " · ".join(x[2] for x in d[:3]) or p.get("basis", "")},
+             {"k": "강세", "t": f"프리장~장초반 전일 고가 {P(ref_hi)} 돌파 + 거래량 유지 → {why}. "
+                              f"1차 {P(t1)}({pct(t1, ref)}) → 2차 {P(t2)}({pct(t2, ref)})"},
+             {"k": "기본", "t": f"{P(ref)}~{P(ref_hi)} 박스 등락. VWAP 지지되면 고가 재시도, 못 지키면 관망"},
+             {"k": "약세", "t": f"전일 종가 {P(ref)} 이탈·거래량 감소 시 매물 출회 → 손절 참고 {P(it.get('stop'))}"}]
+    if r:
+        lines.append({"k": "리스크", "t": " · ".join(x[0] for x in r[:3]) + " — 급등 시 물량 출회 주의"})
+    return lines
+
+
+def jb_eval(it, f, df, jb) -> dict | None:
+    sn = it.get("snap") or {}
+    if not sn.get("reg_last") or not sn.get("prev") or df is None or not sn.get("sdate"):
+        return None
+    day = date.fromisoformat(sn["sdate"])
+    past = df[[ts.date() < day for ts in df.index]]
+    if len(past) < 21:
+        return None
+    avg20 = float(past["Volume"].iloc[-20:].mean())
+    last, prev = sn["reg_last"], sn["prev"]
+    hi, lo = sn.get("reg_hi") or last, sn.get("reg_lo") or last
+    relvol = sn.get("reg_vol", 0) / avg20 if avg20 else float("nan")
+    chg = (last / prev - 1) * 100
+    cp = (last - lo) / (hi - lo) if hi > lo else 0.5
+    ks = jbkeys(relvol, chg, last, cp)
+    p10, n = jb.p(ks)
+    st = jb.stats(ks)
+    nxt = day + timedelta(days=1)
+    while nxt.weekday() >= 5:
+        nxt += timedelta(days=1)
+    return {"day": f"{day.month}/{day.day}", "next": f"{nxt.month}/{nxt.day}({WEEK[nxt.weekday()]})",
+            "price": last, "chg": round(chg, 1), "relvol": round(relvol, 1) if relvol == relvol else None,
+            "cp": round(cp, 2), "p10": None if p10 is None else round(p10 * 100, 1), "n": n,
+            "base": None if jb.base is None else round(jb.base * 100, 1), "st": st,
+            "done": bool(sn.get("reg_done")), "asof": sn.get("reg_time")}
+
+
+def jb_scenario(it, j, d, r, df) -> list[dict]:
+    st = j.get("st") or {}
+    buy = j["price"]
+    stop = buy * 0.92
+    res = resistances(df, buy)
+    t1 = res[0] if res else buy * (1 + JB_HIT)
+    ev = [x[2] for x in d if not x[0].startswith(("저유통", "전일 강세"))][:2]
+    lines = [{"k": "근거", "t": f"오늘 {j['chg']:+.1f}% · 거래량 {j['relvol'] or '-'}배 · 종가 위치 {j['cp'] * 100:.0f}%"
+                               + (" · " + " · ".join(ev) if ev else "")},
+             {"k": "매수", "t": f"마감 직전 {P(buy)} 부근 분할 (현재가 기준, {j['asof'] or '-'} KST)"},
+             {"k": "익일", "t": f"갭상승 확률 {st.get('up', '-')}% · 평균 시가 갭 {st.get('gap', 0):+.1f}% · "
+                              f"+{int(JB_HIT * 100)}% 터치 {j['p10']}% (평균 {j['base']}%)"},
+             {"k": "강세", "t": f"프리장 갭상승 후 {P(t1)}({pct(t1, buy)}) 돌파 시 추가 상승"
+                              + (f", 터지면 평균 고가 +{st['hit_hi']:.0f}%" if st.get("hit_hi") else "")},
+             {"k": "약세", "t": f"시가가 매수가 아래면 미련 없이 정리 · 손절 참고 {P(stop)}(-8%)"}]
+    if r:
+        lines.append({"k": "리스크", "t": " · ".join(x[0] for x in r[:3]) + " — 장 마감 후 증자 공시 위험"})
+    return lines
+
+
+def build_candidates(items, prices, frames, jb):
+    by_t = {it["t"]: it for it in items}
+    # 1차 점수 (외부 조회 없이) → 상위만 뉴스·공매도 조회
+    pre_s = []
+    for it in items:
+        p = it.get("prob") or {}
+        if p.get("reg") is None:
+            continue
+        d, r = drivers_for(it, {}, False)
+        sc = min(55, p["reg"] * 2.5) + min(15, (p.get("pre") or 0) * 0.5) + sum(x[1] for x in d) - min(25, sum(x[1] for x in r))
+        pre_s.append((sc, it["t"]))
+    jbs = []
+    for it in items:
+        j = jb_eval(it, frames.get(it["t"]), prices.get(it["t"]), jb)
+        if j and j["p10"] is not None:
+            it["jb"] = j
+            jbs.append((j["p10"] * 2 + (j["st"].get("up", 50) - 50) * 0.5, it["t"]))
+    pick = [t for _, t in sorted(pre_s, reverse=True)[:15]] + [t for _, t in sorted(jbs, reverse=True)[:12]]
+    ex = {}
+    for t in dict.fromkeys(pick):
+        try:
+            ex[t] = enrich(t)
+        except Exception as e:
+            log.warning("%s 뉴스·공매도 조회 실패: %s", t, e)
+            ex[t] = {}
+    surge, jbc = [], []
+    for t in dict.fromkeys(t for _, t in sorted(pre_s, reverse=True)[:15]):
+        it = by_t[t]
+        it["ex"] = ex.get(t, {})
+        d, r = drivers_for(it, it["ex"], False)
+        p = it["prob"]
+        score = min(55, p["reg"] * 2.5) + min(15, (p.get("pre") or 0) * 0.5) + sum(x[1] for x in d) - min(25, sum(x[1] for x in r))
+        surge.append({"t": t, "name": it["name"], "score": int(max(0, min(100, score))),
+                      "type": d[0][0] if d else "확률형", "drivers": [x[0] for x in d], "risks": [x[0] for x in r],
+                      "prob": p, "price": it["price"], "chg": it["chg"],
+                      "scenario": surge_scenario(it, d, r, prices.get(t)), "news": it["ex"].get("news", []),
+                      "si": it["ex"].get("si"), "dtc": it["ex"].get("dtc"), "float": it.get("float")})
+    surge.sort(key=lambda x: -x["score"])
+    for _, t in sorted(jbs, reverse=True)[:12]:
+        it, j = by_t[t], by_t[t]["jb"]
+        it["ex"] = ex.get(t, {})
+        d, r = drivers_for(it, it["ex"], True)
+        if j["chg"] >= 10 and j["cp"] >= 0.75:
+            typ = "강세 마감형"
+        elif j["chg"] <= -10:
+            typ = "과매도 반등형"
+        elif it["ex"].get("pos"):
+            typ = "재료 대기형"
+        else:
+            typ = d[0][0] if d else "수급형"
+        st = j["st"] or {}
+        score = j["p10"] * 2 + (st.get("up", 50) - 50) * 0.6 + sum(x[1] for x in d) * 0.5 - min(25, sum(x[1] for x in r))
+        jbc.append({"t": t, "name": it["name"], "score": int(max(0, min(100, score))), "type": typ,
+                    "drivers": [x[0] for x in d], "risks": [x[0] for x in r], "jb": j,
+                    "scenario": jb_scenario(it, j, d, r, prices.get(t)), "news": it["ex"].get("news", [])})
+    jbc.sort(key=lambda x: -x["score"])
+    MIN_SCORE = 25                       # 이 점수 미만은 후보에서 제외
+    return [c for c in surge if c["score"] >= MIN_SCORE][:SURGE_TOP], [c for c in jbc if c["score"] >= MIN_SCORE][:JB_TOP]
 
 
 # ───────────────── 6. AI 종합판단 (선택) ─────────────────
@@ -706,6 +1031,70 @@ def ai_summary(item: dict) -> str:
         return ""
 
 
+# ───────────────── 6-2. 하루 캐시 (30분 갱신 시 큰 데이터 재다운로드 방지) ─────────────────
+_CACHE: dict = {}
+
+
+def _cday() -> str:
+    return datetime.now(ET).date().isoformat()
+
+
+def cache_load(name: str):
+    if name not in _CACHE:
+        try:
+            obj = pickle.loads((CACHE / f"{name}.pkl").read_bytes())
+            _CACHE[name] = obj["data"] if obj.get("day") == _cday() else {}
+        except Exception:
+            _CACHE[name] = {}
+    return _CACHE[name]
+
+
+def save_caches():
+    CACHE.mkdir(exist_ok=True)
+    for name, data in _CACHE.items():
+        try:
+            (CACHE / f"{name}.pkl").write_bytes(pickle.dumps({"day": _cday(), "data": data}))
+        except Exception as e:
+            log.warning("캐시 저장 실패 %s: %s", name, e)
+
+
+def cache_get(name, fn):
+    c = cache_load(name)
+    if not c:
+        c.update(fn() or {})
+    return c
+
+
+def daily_cached(tickers):
+    c = cache_load("daily")
+    miss = [t for t in tickers if t not in c]
+    if miss:
+        c.update(daily(miss))
+        for t in miss:
+            c.setdefault(t, None)
+    log.info("일봉 캐시 %d · 새로 받음 %d", len(tickers) - len(miss), len(miss))
+    return {t: c[t] for t in tickers if c.get(t) is not None}
+
+
+def premarket_highs_cached(tickers):
+    c = cache_load("prehi")
+    miss = [t for t in tickers if t not in c]
+    if miss:
+        c.update(premarket_highs(miss))
+        for t in miss:
+            c.setdefault(t, None)
+    return {t: c[t] for t in tickers if c.get(t) is not None}
+
+
+def sec_cached(cik):
+    if not cik:
+        return [], {}
+    c = cache_load("sec")
+    if cik not in c:
+        c[cik] = (filings(cik), financials(cik))
+    return c[cik]
+
+
 # ───────────────── 7. 조립 ─────────────────
 FILING_FORMS = ("8-K", "424B5", "424B4", "424B3", "S-1", "S-1/A", "S-3", "S-3/A",
                 "EFFECT", "DEF 14A", "PRE 14A", "NT 10-Q", "NT 10-K", "10-Q", "10-K")
@@ -715,16 +1104,16 @@ def analyze() -> list[dict]:
     today = datetime.now(KST).date()
     uni = universe()
     if not uni:
-        return []
+        return [], [], []
     tickers = [u["t"] for u in uni]
-    prices = daily(tickers)
+    prices = daily_cached(tickers)
     mins = intraday(tickers)
     log.info("일봉 %d · 1분봉 %d", len(prices), len(mins))
     frames = {t: tech_frame(df) for t, df in prices.items()}
     stats = similar_stats(frames)
     target = target_session()
-    reg_m, pre_m = build_models(frames, premarket_highs(tickers), target)
-    ciks = cik_map()
+    reg_m, pre_m, jb_m = build_models(frames, premarket_highs_cached(tickers), target)
+    ciks = cache_get("cik", cik_map)
     items = []
     for u in uni:
         t = u["t"]
@@ -733,8 +1122,7 @@ def analyze() -> list[dict]:
             snap = snapshot(u, df, mins.get(t))
             price = snap["price"] or u["price"] or 0
             cik = ciks.get(t)
-            fs = filings(cik) if cik else []
-            fin = financials(cik) if cik else {}
+            fs, fin = sec_cached(cik)
             tags, ddays, raw = motive_tags(price, u["float"], fs, fin, df, today)
             stg = int(frames[t]["stage"].iloc[-1]) if t in frames else 0
             st = stats.get(stg, {})
@@ -761,7 +1149,9 @@ def analyze() -> list[dict]:
     items.sort(key=lambda x: x["total"], reverse=True)
     for it in items[:AI_TOP]:
         it["ai"] = ai_summary(it)
-    return items
+    surge, jbc = build_candidates(items, prices, frames, jb_m)
+    save_caches()
+    return items, surge, jbc
 
 
 # ───────────────── 8. 출력 ─────────────────
@@ -781,10 +1171,11 @@ def _clean(o):
     return o
 
 
-def write_page(items: list[dict]) -> None:
+def write_page(items: list[dict], surge=None, jbc=None) -> None:
     tpl = (ROOT / "dashboard_template.html").read_text(encoding="utf-8")
     payload = _clean({"updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"), "items": items,
-                      "forward": FORWARD_DAYS})
+                      "forward": FORWARD_DAYS, "surge": surge or [], "jbc": jbc or [],
+                      "rules": {"reg": int(SURGE_REG * 100), "pre": int(SURGE_PRE * 100), "jb": int(JB_HIT * 100)}})
     data = json.dumps(payload, ensure_ascii=False, default=lambda o: None).replace("</", "<\\/")
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(tpl.replace("/*__DATA__*/null", data), encoding="utf-8")
@@ -792,9 +1183,20 @@ def write_page(items: list[dict]) -> None:
     log.info("대시보드 저장: %s (%d종목)", OUT, len(items))
 
 
-def telegram(items: list[dict]) -> None:
+TELEGRAM_HOURS_KST = {21, 1, 5}   # 매시간 갱신해도 텔레그램 요약은 이 시간대에만 (수동 실행은 항상)
+
+
+def telegram(items: list[dict], surge=None, jbc=None) -> None:
     if not TOKEN:
         return
+    manual = os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    slot = datetime.now(KST).strftime("%Y-%m-%d %H")
+    sent = cache_load("tg")
+    if not manual and (datetime.now(KST).hour not in TELEGRAM_HOURS_KST or sent.get("slot") == slot):
+        log.info("텔레그램 요약 시간 아님 — 대시보드만 갱신")
+        return
+    sent["slot"] = slot
+    save_caches()
     try:
         chat = json.loads((ROOT / "state.json").read_text(encoding="utf-8")).get("chat_id")
     except Exception:
@@ -813,6 +1215,12 @@ def telegram(items: list[dict]) -> None:
         prow = [f"{it['t']:<5} {it['prob']['pre'] or 0:>5.1f}% {it['prob']['reg']:>5.1f}%" for it in pr]
         body += ("\n\n" + f"{p0['date']} 급등확률 TOP5\n티커   프리+{p0['pre_th']}% 본장+{p0['reg_th']}%\n"
                  + "─" * 26 + "\n" + "\n".join(prow) + f"\n평균   {p0['pre_base'] or 0:>5.1f}% {p0['reg_base'] or 0:>5.1f}%")
+    if surge:
+        body += "\n\n🚀 금일 급등 후보\n" + "\n".join(
+            f"{c['t']:<5} {c['score']:>3}점 본장{c['prob']['reg']:>5.1f}% {c['type']}" for c in surge[:3])
+    if jbc:
+        body += "\n\n🎯 종배 예상 (" + jbc[0]["jb"]["day"] + " 종가)\n" + "\n".join(
+            f"{c['t']:<5} {c['score']:>3}점 익일+{int(JB_HIT * 100)}% {c['jb']['p10']:>5.1f}% {c['type']}" for c in jbc[:3])
     link = f'\n\n📊 <a href="{PAGES_URL}">전체 대시보드 보기</a>' if PAGES_URL else ""
     text = (f"🎯 <b>펌핑 목적 워치리스트</b> ({datetime.now(KST):%m/%d %H:%M})\n"
             f"<pre>{html.escape(body)}</pre>강도: 부양 동기 · 차트: 진입 조건{link}\n⚠️ 확률 아님 · 투자 판단은 본인 책임")
@@ -826,12 +1234,12 @@ def telegram(items: list[dict]) -> None:
 def main():
     if not SEC_EMAIL:
         log.warning("SEC_EMAIL 이 없습니다 — SEC 접속이 차단될 수 있어요 (GitHub Secrets 에 등록)")
-    items = analyze()
+    items, surge, jbc = analyze()
     if not items:
         log.error("분석 결과 없음")
         return
-    write_page(items)
-    telegram(items)
+    write_page(items, surge, jbc)
+    telegram(items, surge, jbc)
 
 
 if __name__ == "__main__":

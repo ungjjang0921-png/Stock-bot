@@ -113,13 +113,43 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .prob .pb i{display:block;height:100%;border-radius:3px;background:var(--good)}
 .prob em{font-style:normal;font-size:10.5px;color:var(--muted)}
 .prob .act{display:inline-block;margin-top:2px;font-size:11px;font-weight:700}
+.tabs{display:flex;gap:6px;margin-top:10px}
+.tab{flex:1;text-align:center;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:10px;padding:9px 4px;font-size:13.5px;font-weight:700;cursor:pointer}
+.tab.on{border-color:var(--accent);color:var(--text);background:#0f2433}
+.hide{display:none!important}
+.cand{background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-bottom:12px;overflow:hidden}
+.ch{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:12px 12px 8px}
+.ch .rank{width:28px;height:28px}
+.ty{display:inline-block;font-size:11.5px;font-weight:700;border-radius:6px;padding:2px 8px;margin-top:3px;background:#1d2a3d;color:var(--accent)}
+.cs{text-align:right}.cs b{font-family:var(--mono);font-size:22px;color:var(--warn)}.cs small{display:block;color:var(--muted);font-size:10.5px}
+.kp{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:0 12px 10px}
+.kp div{background:#0d1622;border:1px solid var(--line);border-radius:10px;padding:7px 8px}
+.kp small{display:block;color:var(--muted);font-size:10.5px;line-height:1.3}
+.kp b{font-family:var(--mono);font-size:17px}
+.kp em{display:block;font-style:normal;font-size:10.5px;color:var(--muted)}
+.chipsm{display:flex;flex-wrap:wrap;gap:5px;padding:0 12px 10px}
+.chipsm span{font-size:11px;border-radius:6px;padding:2px 7px;background:#10301f;color:#6be3a4}
+.chipsm span.rk{background:#3a1519;color:#ff8f8f}
+.scn{padding:0 12px 10px}
+.scn div{display:grid;grid-template-columns:46px 1fr;gap:8px;padding:6px 0;border-top:1px dashed var(--line);font-size:12.5px;line-height:1.5}
+.scn b{font-size:11.5px;border-radius:6px;padding:2px 0;text-align:center;height:fit-content}
+.s-근거,.s-매수,.s-익일{background:#1d2a3d;color:var(--accent)}.s-강세{background:#10301f;color:#6be3a4}
+.s-기본{background:#22262e;color:#c9d3df}.s-약세{background:#3a1519;color:#ff8f8f}.s-리스크{background:#3a2a10;color:#ffc062}
+.nws{padding:0 12px 12px;font-size:12px}
+.nws a{display:block;color:var(--text);text-decoration:none;padding:5px 0;border-top:1px solid var(--line)}
+.nws a i{font-style:normal;font-weight:700;margin-right:5px}
+.nws .s-호재{color:var(--good)}.nws .s-악재{color:var(--bad)}.nws .s-중립{color:var(--muted)}
+.nws small{display:block;color:var(--muted);font-size:10.5px}
+.go{display:block;text-align:center;padding:9px;border-top:1px solid var(--line);color:var(--accent);font-size:12.5px;text-decoration:none}
+.intro{color:var(--muted);font-size:12px;line-height:1.55;margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#0d1622}
 </style>
 </head>
 <body>
 <header>
   <h1>🎯 펌핑 목적 워치리스트</h1>
   <div class="sub" id="sub"></div>
-  <div class="controls">
+  <div class="tabs" id="tabs"><span class="tab on" data-v="surge">🚀 급등 후보</span><span class="tab" data-v="jb">🎯 종배 예상</span><span class="tab" data-v="all">📋 전체</span></div>
+  <div class="controls" id="ctl">
     <input id="q" placeholder="티커·회사명 검색" autocomplete="off">
     <select id="sort">
       <option value="total">통합점수순</option>
@@ -268,8 +298,65 @@ function card(it, i){
   </article>`;
 }
 
+let TAB = "surge";
+try { TAB = localStorage.getItem("wl_tab") || "surge"; } catch (e) {}
+const kp = (label, v, sub, cls) => `<div><small>${label}</small><b class="${cls || ''}">${v}</b>${sub ? `<em>${sub}</em>` : ""}</div>`;
+const scn = lines => `<div class="scn">${lines.map(l => `<div><b class="s-${esc(l.k)}">${esc(l.k)}</b><span>${esc(l.t)}</span></div>`).join("")}</div>`;
+const news = ns => !ns || !ns.length ? "" : `<div class="nws">${ns.map(n => `<a href="${esc(n.link)}" target="_blank" rel="noopener"><i class="s-${esc(n.s)}">${esc(n.s)}</i>${esc(n.ko || n.title)}<small>${esc(n.pub)} · ${esc(n.when)}${n.dilute ? " · ⚠️ 희석 관련" : ""}</small></a>`).join("")}</div>`;
+const chipsOf = c => `<div class="chipsm">${c.drivers.map(d => `<span>${esc(d)}</span>`).join("")}${c.risks.map(r => `<span class="rk">⚠ ${esc(r)}</span>`).join("")}</div>`;
+const head = (c, i, sub) => `<div class="ch"><div class="rank ${i<3?'r'+(i+1):''}">${i+1}</div>
+  <div><div class="tk">${esc(c.t)}</div><div class="nm">${esc(c.name)}</div><span class="ty">${esc(c.type)}</span></div>
+  <div class="cs"><b>${c.score}</b><small>${sub}</small></div></div>`;
+function surgeCard(c, i){
+  const p = c.prob || {}, st = p.reg_st || {}, ps = p.pre_st || {};
+  const lift = (v, b) => v != null && b ? (v / b >= 2 ? "up" : v / b < 1 ? "dn" : "") : "";
+  return `<article class="cand">${head(c, i, "급등 후보 점수")}
+    <div class="kp">
+      ${kp(`🌅 프리장 +${p.pre_th}%`, p.pre == null ? "-" : p.pre.toFixed(1) + "%", `평균 ${p.pre_base ?? "-"}%`, lift(p.pre, p.pre_base))}
+      ${kp(`🔔 본장 +${p.reg_th}%`, p.reg == null ? "-" : p.reg.toFixed(1) + "%", `평균 ${p.reg_base ?? "-"}%`, lift(p.reg, p.reg_base))}
+      ${kp("터지면 평균 고가", st.hit_hi != null ? "+" + st.hit_hi.toFixed(0) + "%" : "-", `기대 고가 ${st.avg_hi != null ? (st.avg_hi >= 0 ? "+" : "") + st.avg_hi.toFixed(0) + "%" : "-"}`, "up")}
+    </div>
+    ${chipsOf(c)}
+    ${c.si != null && c.si >= 10 ? `<div class="intro" style="margin:0 12px 10px">공매도 유통 대비 <b>${c.si.toFixed(1)}%</b>${c.dtc != null ? ` · 커버 일수 <b>${c.dtc.toFixed(1)}일</b>` : ""}${c.float ? ` · 유통 ${(c.float / 1e6).toFixed(1)}M주` : ""}</div>` : ""}
+    ${scn(c.scenario)}${news(c.news)}
+    <a class="go" href="#c-${esc(c.t)}" onclick="openCard('${esc(c.t)}');return false">상세 분석 보기 →</a></article>`;
+}
+function jbCard(c, i){
+  const j = c.jb, st = j.st || {};
+  return `<article class="cand">${head(c, i, "종배 점수")}
+    <div class="kp">
+      ${kp("익일 갭상승", st.up != null ? st.up.toFixed(0) + "%" : "-", `평균 갭 ${st.gap != null ? (st.gap >= 0 ? "+" : "") + st.gap.toFixed(1) + "%" : "-"}`, st.up >= 55 ? "up" : st.up < 45 ? "dn" : "")}
+      ${kp(`익일 +${DATA.rules.jb}% 터치`, j.p10 == null ? "-" : j.p10.toFixed(1) + "%", `평균 ${j.base ?? "-"}%`, j.base && j.p10 / j.base >= 2 ? "up" : "")}
+      ${kp("터지면 평균 고가", st.hit_hi != null ? "+" + st.hit_hi.toFixed(0) + "%" : "-", `유사 ${(j.n || 0).toLocaleString()}일`, "up")}
+    </div>
+    ${chipsOf(c)}${scn(c.scenario)}${news(c.news)}
+    <a class="go" href="#c-${esc(c.t)}" onclick="openCard('${esc(c.t)}');return false">상세 분석 보기 →</a></article>`;
+}
+function openCard(t){
+  TAB = "all"; $("#q").value = t; syncTabs(); render();
+  const el = document.getElementById("c-" + t); if (el){ el.classList.add("open"); el.scrollIntoView({behavior:"smooth"}); }
+}
+function syncTabs(){
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x.dataset.v === TAB));
+  $("#ctl").classList.toggle("hide", TAB !== "all"); $("#chips").classList.toggle("hide", TAB !== "all");
+  try { localStorage.setItem("wl_tab", TAB); } catch (e) {}
+}
 function render(){
   if (!DATA){ $("#list").innerHTML = '<div class="empty">데이터가 아직 없어요</div>'; return; }
+  if (TAB === "surge"){
+    const xs = DATA.surge || [], d = xs[0] && xs[0].prob ? xs[0].prob.date : "";
+    $("#sub").textContent = `${DATA.updated} 업데이트 · 30분마다 갱신`;
+    $("#list").innerHTML = `<div class="intro">🚀 <b>${esc(d)} 급등 후보</b> — 과거(본장 5년·프리장 2년) 비슷한 조건의 다음날 실제 급등 비율에 뉴스·공매도·유통물량·공시를 더해 고른 종목이에요. 확률은 과거 빈도이지 보장이 아니에요.</div>`
+      + (xs.map(surgeCard).join("") || '<div class="empty">오늘은 조건에 맞는 급등 후보가 없어요</div>');
+    return;
+  }
+  if (TAB === "jb"){
+    const xs = DATA.jbc || [], j = xs[0] && xs[0].jb;
+    $("#sub").textContent = `${DATA.updated} 업데이트 · 30분마다 갱신`;
+    $("#list").innerHTML = `<div class="intro">🎯 <b>종배 예상${j ? ` · ${esc(j.day)} 종가 → ${esc(j.next)}` : ""}</b> — 오늘 본장 흐름(등락·거래량·종가 위치)이 비슷했던 과거 5년의 다음날 결과로 계산해요. ${j && !j.done ? "장중 값이라 마감 전까지 바뀌어요. 마감 30분 전 갱신분을 보세요." : ""}</div>`
+      + (xs.map(jbCard).join("") || '<div class="empty">본장 데이터가 생기면 표시돼요 (프리장 중엔 비어 있어요)</div>');
+    return;
+  }
   const q = $("#q").value.trim().toLowerCase(), sort = $("#sort").value;
   let xs = DATA.items.filter(it => (!q || it.t.toLowerCase().includes(q) || (it.name||"").toLowerCase().includes(q))
     && [...on].every(f => matches(it, f)));
@@ -291,6 +378,8 @@ $("#chips").addEventListener("click", e => {
   const f = e.target.dataset.f; if (!f) return;
   on.has(f) ? on.delete(f) : on.add(f); e.target.classList.toggle("on"); render();
 });
+$("#tabs").addEventListener("click", e => { const v = e.target.dataset.v; if (!v) return; TAB = v; syncTabs(); render(); window.scrollTo(0, 0); });
+syncTabs();
 $("#q").addEventListener("input", render);
 $("#sort").addEventListener("change", render);
 render();
