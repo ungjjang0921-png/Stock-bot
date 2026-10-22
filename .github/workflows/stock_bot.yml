@@ -2,7 +2,7 @@ name: stock-bot
 
 on:
   schedule:
-    - cron: "*/5 8-21 * * 1-5"
+    - cron: "*/5 8-23 * * 1-5"
   workflow_dispatch:
     inputs:
       task:
@@ -30,6 +30,7 @@ jobs:
       - run: python stock_alert_bot.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          SEC_EMAIL: ${{ secrets.SEC_EMAIL }}
           RUN_ONCE: "1"
           TASK: ${{ github.event.inputs.task || '' }}
       - name: save state
