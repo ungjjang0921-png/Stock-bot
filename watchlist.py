@@ -1287,7 +1287,7 @@ def write_page(items: list[dict], surge=None, jbc=None) -> None:
     tpl = (ROOT / "dashboard_template.html").read_text(encoding="utf-8")
     payload = _clean({"updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"), "items": items,
                       "forward": FORWARD_DAYS, "surge": surge or [], "jbc": jbc or [],
-                      "cal": CALENDAR, "score": scorecard(),
+                      "cal": CALENDAR,
                       "rules": {"reg": int(SURGE_REG * 100), "pre": int(SURGE_PRE * 100), "jb": int(JB_HIT * 100)}})
     data = json.dumps(payload, ensure_ascii=False, default=lambda o: None).replace("</", "<\\/")
     OUT.parent.mkdir(parents=True, exist_ok=True)
