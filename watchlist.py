@@ -60,6 +60,10 @@ TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
 SEC_EMAIL = os.getenv("SEC_EMAIL", "").strip()
 PAGES_URL = os.getenv("PAGES_URL", "").strip()
 ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip()          # 무료 (하루 1,000회)
+GROQ_MODEL = os.getenv("GROQ_MODEL", "").strip()
+GROQ_PREFER = ["gpt-oss-120b", "llama-4-maverick", "llama-3.3-70b", "70b", "gpt-oss-20b", "llama"]
+AI_PER_RUN = 40                                            # 한 번 실행에 새로 쓰는 AI 판단 수 (무료 한도 보호)
 ROOT = Path(__file__).parent
 OUT = ROOT / "docs" / "index.html"
 CACHE = ROOT / ".cache"            # 하루 한 번 받는 큰 데이터 (GitHub actions/cache 로 보관)
@@ -1138,8 +1142,68 @@ def scorecard() -> dict:
 
 
 # ───────────────── 6. AI 종합판단 (선택) ─────────────────
+_groq = {"model": None, "used": 0}
+
+
+def _groq_model() -> str | None:
+    if _groq["model"]:
+        return _groq["model"]
+    if GROQ_MODEL:
+        _groq["model"] = GROQ_MODEL
+        return GROQ_MODEL
+    try:
+        ids = [m["id"] for m in http.get("https://api.groq.com/openai/v1/models", timeout=20,
+                                         headers={"Authorization": f"Bearer {GROQ_KEY}"}).json().get("data", [])]
+        for want in GROQ_PREFER:
+            hit = next((i for i in ids if want in i and "guard" not in i), None)
+            if hit:
+                _groq["model"] = hit
+                log.info("Groq 모델: %s", hit)
+                return hit
+    except Exception as e:
+        log.warning("Groq 모델 목록 실패: %s", e)
+    return None
+
+
+def llm(prompt: str, max_tokens: int = 600) -> str:
+    """Anthropic 키가 있으면 Claude, 없으면 Groq(무료). 둘 다 없으면 빈 문자열"""
+    if ANTHROPIC_KEY:
+        try:
+            r = http.post("https://api.anthropic.com/v1/messages", timeout=90,
+                          headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
+                                   "content-type": "application/json"},
+                          json={"model": AI_MODEL, "max_tokens": max_tokens,
+                                "messages": [{"role": "user", "content": prompt}]})
+            return "".join(b.get("text", "") for b in r.json().get("content", [])).strip()
+        except Exception as e:
+            log.warning("Claude 실패: %s", e)
+            return ""
+    if GROQ_KEY and _groq["used"] < AI_PER_RUN:
+        model = _groq_model()
+        if not model:
+            return ""
+        _groq["used"] += 1
+        for attempt in range(3):
+            try:
+                r = http.post("https://api.groq.com/openai/v1/chat/completions", timeout=90,
+                              headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
+                              json={"model": model, "max_tokens": max_tokens, "temperature": 0.3,
+                                    "messages": [{"role": "system", "content": "너는 미국 소형주 공시 분석가다. 반드시 한국어로만 답한다."},
+                                                 {"role": "user", "content": prompt}]})
+                if r.status_code == 429:
+                    time.sleep(min(30, float(r.headers.get("retry-after", 10))))
+                    continue
+                txt = r.json()["choices"][0]["message"]["content"].strip()
+                time.sleep(2.2)                    # 분당 30회 한도
+                return re.sub(r"<think>.*?</think>", "", txt, flags=re.S).strip()
+            except Exception as e:
+                log.warning("Groq 실패: %s", e)
+                time.sleep(3)
+    return ""
+
+
 def ai_summary(item: dict) -> str:
-    if not ANTHROPIC_KEY:
+    if not (ANTHROPIC_KEY or GROQ_KEY):
         return ""
     facts = {k: item[k] for k in ("t", "name", "price", "strength", "runway", "tags", "ddays", "stage")}
     facts["filings"] = [f"{f['date']} {f['form']} {f['items']}" for f in item["filings"][:15]]
@@ -1147,16 +1211,11 @@ def ai_summary(item: dict) -> str:
     prompt = ("다음은 미국 소형주의 SEC 공시·재무·오늘 시세 요약이다. 회사가 주가를 부양해야 할 동기(상장유지, 현금조달, "
               "물량출회, 병합)와 위험(희석, 출회)을 한국어 3문장 이내로 판단하라. 확실하지 않은 건 '확인 필요'로 표시하고 "
               "매수 권유는 하지 마라.\n" + json.dumps(facts, ensure_ascii=False))
-    try:
-        r = http.post("https://api.anthropic.com/v1/messages", timeout=60,
-                      headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
-                               "content-type": "application/json"},
-                      json={"model": AI_MODEL, "max_tokens": 400,
-                            "messages": [{"role": "user", "content": prompt}]})
-        return "".join(b.get("text", "") for b in r.json().get("content", []))
-    except Exception as e:
-        log.warning("AI 요약 실패 %s: %s", item["t"], e)
-        return ""
+    c = cache_load("aisum")
+    key = item["t"] + ":" + (item["filings"][0]["date"] if item.get("filings") else "")
+    if key not in c:
+        c[key] = llm(prompt, 400)
+    return c[key]
 
 
 # ───────────────── 6-2. 하루 캐시 (30분 갱신 시 큰 데이터 재다운로드 방지) ─────────────────
@@ -1200,7 +1259,7 @@ def profile_cached(t) -> dict:
 
 
 def report_ai(rep: dict) -> str:
-    if not ANTHROPIC_KEY:
+    if not (ANTHROPIC_KEY or GROQ_KEY):
         return ""
     c = cache_load("rai")
     key = rep["t"] + ":" + (rep["timeline"][0]["date"] if rep["timeline"] else "")
@@ -1214,16 +1273,9 @@ def report_ai(rep: dict) -> str:
               "현금 조달·상장 유지·물량 출회 중 무엇이 핵심 목적인지, 펌핑 후 조달(희석) 시나리오, 확인이 필요한 공시를 "
               "구체적 날짜·금액·가격으로 적어라. 데이터에 없는 사실은 지어내지 말고 '확인 필요'라고 써라. 매수 권유 금지.\n"
               + json.dumps(_clean(facts), ensure_ascii=False, default=str)[:12000])
-    try:
-        r = http.post("https://api.anthropic.com/v1/messages", timeout=90,
-                      headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
-                               "content-type": "application/json"},
-                      json={"model": AI_MODEL, "max_tokens": 700, "messages": [{"role": "user", "content": prompt}]})
-        txt = "".join(b.get("text", "") for b in r.json().get("content", []))
-    except Exception as e:
-        log.warning("%s 리포트 AI 실패: %s", rep["t"], e)
-        txt = ""
-    c[key] = txt
+    txt = llm(prompt, 700)
+    if txt:
+        c[key] = txt                               # 실패하면 저장 안 함 → 다음 실행에 재시도
     return txt
 
 
