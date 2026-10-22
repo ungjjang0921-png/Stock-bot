@@ -39,7 +39,35 @@ FEEDS = [
     ("PR Newswire", "https://www.prnewswire.com/rss/news-releases-list.rss"),
     ("Business Wire", "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeEFpRWQ=="),
 ]
-SEC_FORMS = ["8-K", "6-K", "SC 13D", "424B5", "424B4", "S-1", "F-1"]
+SEC_FORMS = ["8-K", "6-K", "SC 13D", "424B5", "424B4", "424B3", "S-1", "S-1/A", "F-1", "S-3", "EFFECT",
+             "NT 10-Q", "NT 10-K"]
+SEC_DIGEST = True                # 소형주 SEC 공시(호재·악재·주의)를 1분 단위로 묶어 실시간 전송
+
+# 공시 분류 (form · 8-K item → 호재/악재/주의)
+D_ITEMS = {"1.01": ("호재", "주요 계약 체결"), "2.01": ("호재", "인수·합병 완료"), "1.02": ("악재", "계약 해지"),
+           "1.03": ("악재", "파산"), "2.04": ("악재", "채무 조기상환 사유"), "3.01": ("악재", "상장 규정 미달 통지"),
+           "3.02": ("악재", "미등록 주식 발행(희석)"), "4.02": ("악재", "과거 재무제표 신뢰 불가"),
+           "3.03": ("주의", "주주 권리 변경"), "4.01": ("주의", "감사인 교체"), "5.03": ("주의", "정관 변경(병합 가능)")}
+D_FORMS = {"424B5": ("악재", "ATM·공모 설명서 (희석)"), "424B4": ("악재", "공모가 확정 (희석)"),
+           "424B3": ("악재", "재판매 등록 (물량 출회)"), "S-1": ("악재", "증권신고서 (공모 준비)"),
+           "S-1/A": ("악재", "증권신고서 정정 (공모 임박)"), "F-1": ("악재", "증권신고서 (해외기업 공모)"),
+           "S-3": ("주의", "선반등록 Shelf (언제든 증자 가능)"), "EFFECT": ("주의", "신고서 효력 발생 — 곧 발행 가능"),
+           "NT 10-Q": ("악재", "분기보고 지연"), "NT 10-K": ("악재", "연간보고 지연"),
+           "SC 13D": ("호재", "5% 이상 지분 취득 (경영 참여)")}
+
+
+def sec_side(form: str, items: list[str]) -> tuple[str, str]:
+    if form.startswith("8-K") or form == "6-K":
+        its = [i for i in items if i != "9.01"]
+        if "1.01" in its and "3.02" in its:
+            return "악재", "증자 계약 체결 (주식·워런트 발행)"
+        labs = [D_ITEMS[i] for i in its if i in D_ITEMS]
+        if not labs:
+            return "중립", "수시공시"
+        rank = {"악재": 3, "주의": 2, "호재": 1}
+        side = max((x[0] for x in labs), key=lambda v: rank[v])
+        return side, " · ".join(dict.fromkeys(x[1] for x in labs))
+    return D_FORMS.get(form, ("중립", form))
 MAX_AGE_MIN = 45                 # 이보다 오래된 보도자료는 무시 (GitHub 지연 감안)
 MAX_PRICE = 30.0
 MAX_MCAP = 2e9
@@ -372,7 +400,7 @@ def scan_catalysts(state: dict, send, translate, watch: list[str]) -> None:
     recent = state.setdefault("cat_recent", {})
     for k in [k for k, v in recent.items() if now - datetime.fromisoformat(v["ts"]) > timedelta(hours=6)]:
         del recent[k]
-    alerts = []
+    alerts, digest = [], []
     for it in fresh:
         for t in it["tickers"][:3]:
             qt = q.get(t)
@@ -383,6 +411,10 @@ def scan_catalysts(state: dict, send, translate, watch: list[str]) -> None:
             small = (price or 99) <= MAX_PRICE and ((mcap or 0) <= MAX_MCAP or (fl or 0) <= MAX_FLOAT)
             if not small and t not in watch:
                 continue
+            if it["src"] == "SEC" and SEC_DIGEST:
+                side, lab = sec_side(it["form"], it["items"])
+                if side != "중립":
+                    digest.append((side, t, it, price, chg, fl, lab))
             if it["src"] == "SEC":
                 hits, neg = [], []
                 for i in it["items"]:
@@ -415,6 +447,20 @@ def scan_catalysts(state: dict, send, translate, watch: list[str]) -> None:
             elif not neg and GRADE_ORDER[grade] >= GRADE_ORDER[MIN_GRADE]:
                 alerts.append(("cat", t, it, qt, price, chg, vol, fl, mcap, hits, neg, grade, score))
     alerts.sort(key=lambda a: -a[12])
+    alerted = {a[1] for a in alerts[:6]}
+    rows = [d for d in digest if d[1] not in alerted]
+    if rows:
+        order = {"악재": 0, "주의": 1, "호재": 2}
+        rows.sort(key=lambda d: order[d[0]])
+        icon = {"악재": "🔴", "주의": "🟠", "호재": "🟢"}
+        lines = []
+        for side, t, it, price, chg, fl, lab in rows[:12]:
+            ch = f" {chg:+.1f}%" if chg is not None else ""
+            when = it["ts"].astimezone(KST).strftime("%H:%M")
+            link = f' · <a href="{html.escape(it["link"])}">원문</a>' if it["link"] else ""
+            lines.append(f"{icon[side]} <b>{t}</b> {side} · {html.escape(lab)} ({it['form']})\n"
+                         f"    {_p(price)}{ch} · 유통 {_big(fl)} · {when}{link}")
+        send(f"📑 <b>실시간 공시</b> ({len(rows)}건)\n" + "\n".join(lines))
     for kind, t, it, qt, price, chg, vol, fl, mcap, hits, neg, grade, score in alerts[:6]:
         age = int((now - it["ts"]).total_seconds() // 60)
         ko = translate(it["title"]) if it["src"] != "SEC" else it["title"]
@@ -428,6 +474,10 @@ def scan_catalysts(state: dict, send, translate, watch: list[str]) -> None:
                  f"💬 {html.escape(ko)}\n{mkt}{link}\n⚠️ 급등 중 증자·희석 공시 = 물량 출회 위험")
             log_alert(state, "희석경고", t, price)
             continue
+        import guard
+        ok, bad, ginfo = guard.pre_check(t, price or 0, chg) if price else (True, [], {"upside": None})
+        if not ok:
+            continue                                     # 호재여도 설거지 위험이면 제외
         labels = " · ".join(h[0] for h in hits[:2])
         icon = {"S": "🔥🔥", "A": "🔥", "B": "📰"}[grade]
         send(f"{icon} <b>촉매 포착 [{grade}]</b> {t} · {html.escape(labels)}\n"
@@ -436,6 +486,7 @@ def scan_catalysts(state: dict, send, translate, watch: list[str]) -> None:
              f"⚡ 거래량이 붙는지 확인 후 대응 — 재료만으로 오르지 않을 수 있어요")
         recent[t] = {"label": labels, "grade": grade, "ts": now.isoformat(), "title": ko[:80], "src": it["src"]}
         log_alert(state, "촉매", t, price, grade=grade, cat=hits[0][0] if hits else "")
+        guard.track(state, t, price, "촉매")
 
 
 # ───────────────── 4. 거래량 점화 감지 ─────────────────
@@ -495,12 +546,23 @@ def scan_ignition(state: dict, send) -> None:
     state["ign_prev"] = {r["t"]: list(live(r, now_et)[::2]) for r in rows if live(r, now_et)[0]}
     state["ign_prev_at"] = now.isoformat()
     hits.sort(key=lambda h: -h[0])
-    for prio, t, r, price, chg, vol, fl, avg, why, cat in hits[:IGN_PER_RUN]:
+    import guard
+    sent_n = 0
+    for prio, t, r, price, chg, vol, fl, avg, why, cat in hits:
+        if sent_n >= IGN_PER_RUN:
+            break
+        ok, bad, ginfo = guard.pre_check(t, price, chg)
+        if not ok:
+            continue                                     # 설거지 위험 → 제외
+        sent_n += 1
         done_today.append(t)
         rel = f" · 평소의 {vol / avg:.1f}배" if avg else ""
         tag = (f"\n🧨 <b>재료+수급 동시</b>: [{cat['grade']}] {html.escape(cat['label'])} — {html.escape(cat['title'])}"
                if cat else "\n❔ 재료 미확인 — 뉴스 없이 오르면 설거지 주의")
-        send(f"⚡ <b>점화 포착</b> {t} ({sess} {chg:+.1f}%)\n"
-             f"💰 {_p(price)} · {why}\n📦 누적 {_big(vol)}{rel} · 유통 {_big(fl)}{tag}\n"
-             f"📊 {stat_line(state, '점화')}")
+        import signals
+        up = "위에 매물 없음" if ginfo.get("upside") is None else f"다음 저항 +{ginfo['upside']}%"
+        signals.buy(state, send, t, price, "급등",
+                    why=[f"{sess} {chg:+.1f}%", why, f"유통 {_big(fl)}", up,
+                         f"재료 [{cat['grade']}] {cat['label']}" if cat else "재료 미확인"],
+                    name=r.get("description") or "")
         log_alert(state, "점화", t, price, combo=bool(cat))

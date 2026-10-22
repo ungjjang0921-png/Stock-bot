@@ -41,11 +41,14 @@ import yfinance as yf
 from ta.momentum import RSIIndicator
 
 import catalyst
+import guard
+import signals
+import launch
 
 # ═════════════════════ 설정 ═════════════════════
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-DEFAULT_TICKERS = ["AAPL", "TSLA", "NVDA"]       # 처음 기본값 (이후 /add /del 로 관리)
+DEFAULT_TICKERS: list[str] = []                 # 관심종목 (텔레그램 /add /del 로 관리)
 
 # 1) 실시간 신호
 RSI_PERIOD = 14
@@ -187,6 +190,9 @@ HELP = ("🤖 <b>사용법</b>\n"
         "/scan — 매집 스캔 지금 실행\n"
         "/jongbae — 종배 후보 지금 실행\n"
         "/score — 알림 성적표 (유형별 적중률)\n"
+        "/launch — 소형주 출발 대기 후보 목록\n"
+        "/track — 추천 종목 설거지 감시 현황\n"
+        "/signals — 매수 신호 가상 매매 성적\n"
         + ("※ 명령은 5분 안에 반영돼요" if RUN_ONCE else "※ 실시간 서버 — 명령 즉시 반영"))
 
 
@@ -228,6 +234,12 @@ def process_updates(poll: int = 0) -> set[str]:
         elif cmd == "/jongbae":
             forced.add("jongbae")
             send("🎯 종배 후보를 분석해요. 몇 분 걸려요…")
+        elif cmd == "/signals":
+            send(signals.stats_text(STATE))
+        elif cmd == "/track":
+            send(guard.track_text(STATE))
+        elif cmd == "/launch":
+            send(launch.list_text(STATE))
         elif cmd == "/score":
             send(catalyst.score_text(STATE))
         elif cmd in ("/start", "/help"):
@@ -908,28 +920,15 @@ def run_surge(sess: str) -> None:
 
     passed.sort(key=lambda x: x[0]["score"], reverse=True)
     now_iso = datetime.now(timezone.utc).isoformat()
-    tbl, why = [], []
     for r, good, bad in passed:
-        p = f"{r['price']:.3f}" if r["price"] < 1 else f"{r['price']:.2f}"
-        res = f"+{r['resist']:.0f}%" if r["resist"] else "신고가"
-        tbl.append([r["t"], p, f"+{r['chg']:.0f}%", str(r["score"]), res])
-        why.append(f"• <b>{r['t']} {r['score']}점</b> {band_stats(score_band(r['score']))}\n  "
-                   + "·".join(good) + (f" ⚠️{'·'.join(bad)}" if bad else "")
-                   + f" · 거래량 {vol_s(r['vol'])}"
-                   + (f" · 유통 {r['float'] / 1e6:.1f}M" if r.get("float") else ""))
         STATE.setdefault("surge_log", []).append(
             {"t": r["t"], "date": datetime.now(ET).date().isoformat(), "at": now_iso,
              "price": r["price"], "score": r["score"], "max_gain": None})
         catalyst.log_alert(STATE, "급등후보", r["t"], r["price"], score=r["score"])
-    icon = "🌅" if sess == "프리장" else "🔔"
-    kst = datetime.now(KST).strftime("%H:%M")
-    msg = (f"🚀 <b>급등 후보</b> ({icon} {sess} {kst})\n"
-           + table(["티커", "주가", "등락", "점수", "저항"], tbl, right={1, 2, 3, 4})
-           + "\n".join(why)
-           + "\n\n<i>점수: 0~100 · 저항: 다음 저항선까지 남은 %\n적중: 알림 후 +20% 도달 비율 (봇 실제 기록)</i>")
-    if dumped:
-        msg += f"\n\n🚫 설거지 의심 제외: {', '.join(dumped)}"
-    send(msg + "\n⚠️ 저가주는 변동성 극심 · 손절 필수")
+        res = "위에 매물 없음" if not r.get("resist") else f"다음 저항 +{r['resist']:.0f}%"
+        signals.buy(STATE, send, r["t"], r["price"], "급등",
+                    why=[f"{sess} +{r['chg']:.0f}%", f"{r['score']}점", "·".join(good),
+                         f"거래량 {vol_s(r['vol'])}", res])
 
 
 # ───────────────── 실행 ─────────────────
@@ -978,9 +977,16 @@ def run_once(forced: set[str] | None = None, poll: bool = True) -> None:
         except Exception as e:
             log.exception("뉴스 오류: %s", e)
 
+    if dtime(4, 0) <= now.time() < dtime(22, 0):        # SEC 접수 마감(22:00 ET)까지 공시 감시
+        try:
+            catalyst.scan_catalysts(STATE, send, translate_ko, STATE["tickers"] + list(STATE.get("track", {})))
+        except Exception as e:
+            log.exception("촉매 감지 오류: %s", e)
     if dtime(4, 0) <= now.time() < dtime(20, 0):
-        for name, fn in (("촉매 감지", lambda: catalyst.scan_catalysts(STATE, send, translate_ko, STATE["tickers"])),
-                         ("점화 감지", lambda: catalyst.scan_ignition(STATE, send))):
+        for name, fn in (("점화 감지", lambda: catalyst.scan_ignition(STATE, send)),
+                         ("출발 감지", lambda: launch.scan(STATE, send)),
+                         ("설거지 감시", lambda: guard.watch(STATE, send)),
+                         ("가상 체결·매도", lambda: signals.manage(STATE, send))):
             try:
                 fn()
             except Exception as e:
@@ -1024,6 +1030,7 @@ def run_once(forced: set[str] | None = None, poll: bool = True) -> None:
 
 
 def main() -> None:
+    signals.TRANSLATE = translate_ko
     if not TELEGRAM_TOKEN:
         log.error("TELEGRAM_TOKEN 이 없습니다. (GitHub: Settings → Secrets)")
         return

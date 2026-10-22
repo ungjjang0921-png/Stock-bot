@@ -21,6 +21,7 @@ import yfinance as yf
 
 import catalyst
 import guard
+import signals
 
 log = logging.getLogger("launch")
 
@@ -178,23 +179,13 @@ def scan(state: dict, send) -> None:
         stop = max(s["box_lo"], (s["box_hi"] + s["box_lo"]) / 2 * 0.97)
         rel = vol / s["avgvol"] if s["avgvol"] else 0
         cat = recent.get(t)
-        msg = (f"🛫 <b>출발 신호</b> {t} ({sess} {chg:+.1f}%)\n"
-               f"💰 {catalyst._p(price)} · {why}\n"
-               f"🧱 바닥 박스 {catalyst._p(s['box_lo'])}~{catalyst._p(s['box_hi'])} (6개월 최저 {catalyst._p(s['low6'])} 근처)\n"
-               f"🔎 {' · '.join(s['hits'])}\n"
-               f"📦 거래량 평소의 {rel:.1f}배 · 유통 {catalyst._big(s.get('float'))}\n"
-               f"{guard.upside_line(ginfo)}\n"
-               f"🎯 1차 {catalyst._p(t1)} ({(t1 / price - 1) * 100:+.0f}%) · 2차 {catalyst._p(t2)} ({(t2 / price - 1) * 100:+.0f}%)\n"
-               f"🛑 손절 참고 {catalyst._p(stop)} ({(stop / price - 1) * 100:.0f}%) — 박스 안으로 되밀리면 실패\n"
-               f"📊 셋업 {s['score']}점 · {catalyst.stat_line(state, '출발')}")
-        if cat:
-            msg += f"\n🧨 <b>재료 동반</b>: [{cat['grade']}] {html.escape(cat['label'])}"
         warn = _dilution_news(t)
-        if warn:
-            msg += f"\n🚨 <b>증자·병합 뉴스 주의</b>: {html.escape(warn[:80])}"
-        send(msg)
+        up = "위에 매물 없음" if ginfo.get("upside") is None else f"다음 저항 +{ginfo['upside']}%"
+        signals.buy(state, send, t, price, "출발",
+                    why=[why, f"바닥 박스 {catalyst._p(s['box_lo'])}~{catalyst._p(s['box_hi'])}",
+                         f"거래량 평소 {rel:.1f}배", up, f"재료 [{cat['grade']}] {cat['label']}" if cat else ""],
+                    name=qt.get("description") or "", dilute=bool(warn))
         catalyst.log_alert(state, "출발", t, price, score=s["score"])
-        guard.track(state, t, price, "출발", stop)
 
 
 def list_text(state: dict) -> str:
