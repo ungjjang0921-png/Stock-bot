@@ -7,7 +7,9 @@
     "GPUS"
   ],
   "last_alert": {
-    "GPUS": "2026-10-21T14:07:06.775067+00:00"
+    "GPUS": "2026-10-21T14:07:06.775067+00:00",
+    "TSLA": "2026-10-22T08:29:44.544142+00:00",
+    "NVDA": "2026-10-22T08:29:45.049186+00:00"
   },
   "news_seen": [],
   "done": {
@@ -17,25 +19,10 @@
   },
   "update_offset": 757962979,
   "surge_alerted": {
-    "2026-10-21": [
+    "2026-10-22": [
+      "PFSA",
       "RBNE",
-      "WHLR",
-      "SPHL",
-      "SHFS",
-      "OLOX",
-      "SHMD",
-      "INVE",
-      "NEXR",
-      "AMOD",
-      "POM",
-      "KTTA",
-      "VIVO",
-      "TNMG",
-      "XHLD",
-      "BTTC",
-      "DFSC",
-      "HURA",
-      "NIXX"
+      "STAK"
     ]
   },
   "surge_log": [
@@ -45,7 +32,7 @@
       "at": "2026-10-21T10:48:14.333547+00:00",
       "price": 3.4547,
       "score": 58,
-      "max_gain": null
+      "max_gain": 0.7
     },
     {
       "t": "OLOX",
@@ -53,7 +40,7 @@
       "at": "2026-10-21T10:48:14.333547+00:00",
       "price": 0.8359,
       "score": 51,
-      "max_gain": null
+      "max_gain": 48.3
     },
     {
       "t": "INVE",
@@ -61,7 +48,7 @@
       "at": "2026-10-21T11:33:05.431457+00:00",
       "price": 2.629,
       "score": 63,
-      "max_gain": null
+      "max_gain": 8.0
     },
     {
       "t": "AMOD",
@@ -69,7 +56,7 @@
       "at": "2026-10-21T13:26:44.798710+00:00",
       "price": 1.8303,
       "score": 79,
-      "max_gain": null
+      "max_gain": 24.0
     }
   ]
 }
