@@ -63,7 +63,7 @@ ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip()          # 무료 (하루 1,000회)
 GROQ_MODEL = os.getenv("GROQ_MODEL", "").strip()
 GROQ_PREFER = ["gpt-oss-120b", "llama-4-maverick", "llama-3.3-70b", "70b", "gpt-oss-20b", "llama"]
-AI_PER_RUN = 40                                            # 한 번 실행에 새로 쓰는 AI 판단 수 (무료 한도 보호)
+AI_PER_RUN = 60                                            # 한 번 실행에 새로 쓰는 AI 판단 수 (무료 한도 보호)
 ROOT = Path(__file__).parent
 OUT = ROOT / "docs" / "index.html"
 CACHE = ROOT / ".cache"            # 하루 한 번 받는 큰 데이터 (GitHub actions/cache 로 보관)
@@ -804,6 +804,16 @@ def translate_ko(text: str) -> str:
     """구글 번역 → 실패하면 Groq/Claude 로 번역 → 그래도 실패하면 원문"""
     if not text or HANGUL.search(text):
         return text
+    tc = cache_load("tr")
+    if text in tc:
+        return tc[text]
+    out = _translate(text)
+    if HANGUL.search(out):
+        tc[text] = out                             # 성공한 번역만 하루 캐시
+    return out
+
+
+def _translate(text: str) -> str:
     for attempt in range(2):
         try:
             r = http.post("https://translate.googleapis.com/translate_a/single", timeout=10,
@@ -815,8 +825,8 @@ def translate_ko(text: str) -> str:
         except Exception as e:
             log.debug("구글 번역 실패: %s", e)
         time.sleep(1)
-    if len(text) > 80 and (ANTHROPIC_KEY or GROQ_KEY):
-        out = llm("다음 영어 회사 소개를 자연스러운 한국어 2~3문장으로 번역해. 번역문만 출력해.\n\n" + text, 400)
+    if ANTHROPIC_KEY or GROQ_KEY:
+        out = llm("다음 영어 문장을 자연스러운 한국어로 번역해. 종목명·고유명사는 그대로 두고 번역문만 출력해.\n\n" + text, 400)
         if HANGUL.search(out or ""):
             return out
     return text
