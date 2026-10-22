@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>종목 상세 리포트</title>
+<style>
+:root{--bg:#f4f1ea;--paper:#fffdf8;--ink:#1f2328;--muted:#7a7468;--line:#e4ddcf;--red:#c0392b;--redbg:#fbe9e6;
+--grn:#1e8a4c;--grnbg:#e5f4ea;--org:#b9770e;--orgbg:#fdf2dc;--blu:#2457a6;--blubg:#e6eefb;--vio:#6b4fbb;--viobg:#efeafb;
+--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1116;--paper:#161b22;--ink:#e6edf3;--muted:#8b949e;
+--line:#2a313b;--redbg:#3a1a1a;--grnbg:#12301f;--orgbg:#33270f;--blubg:#13233d;--viobg:#221b3a;--red:#ff7b72;--grn:#56d364;--org:#e3b341;--blu:#79c0ff;--vio:#bc8cff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.6 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",sans-serif}
+.top{position:sticky;top:0;z-index:3;display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--paper);border-bottom:1px solid var(--line)}
+.top a{color:var(--blu);text-decoration:none;font-weight:700}.top span{color:var(--muted);font-size:12px;margin-left:auto}
+main{max-width:860px;margin:0 auto;padding:12px 12px 60px}
+.sec{background:var(--paper);border:1px solid var(--line);border-radius:12px;margin-bottom:14px;overflow:hidden}
+.sh{display:flex;gap:8px;align-items:baseline;padding:10px 14px;border-bottom:1px solid var(--line);border-left:4px solid var(--red)}
+.sh b{font-size:15px}.sh small{color:var(--muted);font-size:12px}
+.sb{padding:12px 14px}
+h1{margin:0;font-size:26px;letter-spacing:.5px}.nm{color:var(--muted);font-size:12.5px}
+.kv{display:flex;flex-wrap:wrap;gap:6px 22px;margin:10px 0}.kv div small{display:block;color:var(--muted);font-size:11px}.kv b{font-family:var(--mono)}
+.row{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin:6px 0}.row>i{font-style:normal;color:var(--muted);font-size:11.5px;min-width:30px}
+.tg{font-size:11.5px;border-radius:5px;padding:1px 7px;border:1px solid transparent;white-space:nowrap}
+.r{background:var(--redbg);color:var(--red)}.g{background:var(--grnbg);color:var(--grn)}.o{background:var(--orgbg);color:var(--org)}
+.b{background:var(--blubg);color:var(--blu)}.v{background:var(--viobg);color:var(--vio)}.n{background:var(--bg);color:var(--muted);border-color:var(--line)}
+p{margin:8px 0}.mut{color:var(--muted);font-size:12.5px}
+.box{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:10px 0;font-size:13px}
+.lad{border-collapse:collapse;width:100%}.lad td{padding:6px 6px;border-bottom:1px solid var(--line);vertical-align:top;font-size:13.5px}
+.lad td:first-child{font-family:var(--mono);white-space:nowrap;width:1%}.lad .pc{font-size:10.5px;color:var(--muted);margin-left:3px}
+.lad tr.now td{background:var(--blubg);font-weight:700}.lad tr.up td:first-child{color:var(--grn)}.lad tr.down td:first-child{color:var(--red)}
+.lad tr.sup td:first-child{color:var(--red)}.lad tr.res td:first-child{color:var(--org)}
+.pts div{font-size:13px;margin:2px 0}.pts .p{color:var(--grn)}.pts .m{color:var(--red)}.pts .z{color:var(--muted)}
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px}.tbl th{white-space:nowrap;color:var(--muted);font-weight:600;text-align:left;padding:5px 4px;border-bottom:1px solid var(--line)}
+.tbl td{padding:6px 4px;border-bottom:1px solid var(--line);vertical-align:top}.tbl td.num{font-family:var(--mono);white-space:nowrap}
+.big{font-family:var(--mono);font-size:22px;font-weight:800}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.g3 small{display:block;color:var(--muted);font-size:11px}
+.verdict{background:var(--orgbg);border-left:4px solid var(--org);border-radius:8px;padding:12px 14px;font-size:15px;line-height:1.75}
+.chk{background:#fff7c2;border-radius:8px;padding:10px 14px;margin-top:10px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .chk{background:#332e10}}
+.chk b{color:var(--org)}.chk div{font-size:13px;margin:3px 0}
+.pur{border-top:1px solid var(--line);padding:10px 0}.pur:first-child{border-top:0}
+.pur .ph{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.pur .ph b{font-size:14px}
+.pg{display:grid;grid-template-columns:60px 1fr;gap:4px 8px;margin-top:6px;font-size:13px}.pg i{font-style:normal;color:var(--muted);font-size:11.5px}
+.ev{display:grid;grid-template-columns:128px 1fr;gap:6px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.ev .d{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.dd{white-space:nowrap;font-size:10.5px;border-radius:4px;padding:0 5px;margin-left:4px;background:var(--orgbg);color:var(--org)}
+.tl{display:grid;grid-template-columns:86px 54px 1fr;gap:6px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px;align-items:start}
+.tl .d{font-family:var(--mono);font-size:12px;color:var(--muted)}.tl a{color:var(--blu)}
+textarea{width:100%;min-height:90px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);padding:8px;font:inherit}
+.empty{color:var(--muted);text-align:center;padding:30px}
+svg.sp{width:110px;height:28px}svg.sp polyline{fill:none;stroke:var(--red);stroke-width:1.5}
+</style>
+</head>
+<body>
+<div class="top"><a href="./">← 워치리스트</a><span id="up"></span></div>
+<main id="m"><div class="empty">불러오는 중…</div></main>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const P = v => v == null ? "-" : (v < 1 ? "$" + v.toFixed(4) : "$" + v.toFixed(2));
+const B = v => v == null ? "-" : v >= 1e9 ? (v/1e9).toFixed(2)+"B" : v >= 1e6 ? (v/1e6).toFixed(1)+"M" : (v/1e3).toFixed(0)+"K";
+const pc = v => v == null ? "" : `<span class="pc">${v >= 0 ? "+" : ""}${v}%</span>`;
+const tgc = lv => /급함|필요|기한형|위험|높음/.test(lv) ? "r" : /가능|예정|진행|활성|안건/.test(lv) ? "o" : /^x|M$/.test(lv) ? "v" : "g";
+const sec = (n, title, sub, body, color) => `<div class="sec"><div class="sh" style="border-left-color:${color || 'var(--red)'}"><b>${n}. ${title}</b><small>${sub || ""}</small></div><div class="sb">${body}</div></div>`;
+function spark(a){ if (!a || a.length < 3) return ""; const lo = Math.min(...a), hi = Math.max(...a), r = (hi - lo) || 1;
+  return `<svg class="sp" viewBox="0 0 110 28"><polyline points="${a.map((v,i)=>(i*110/(a.length-1)).toFixed(1)+","+(26-(v-lo)/r*24).toFixed(1)).join(" ")}"/></svg>`; }
+function dday(d){ return d == null ? "" : `<span class="dd">${d >= 0 ? "D-" + d : "D+" + (-d)}</span>`; }
+
+function render(r){
+  document.title = `${r.t} 상세 리포트`;
+  $("#up").textContent = `${r.updated} 기준`;
+  const sp = r.spike;
+  let h = "";
+  // 1. 회사
+  h += sec(1, "회사", r.sector, `
+    <h1>${esc(r.t)}</h1><div class="nm">${esc(r.name)} ${r.exch ? "· " + esc(r.exch) : ""}</div>
+    <div class="kv"><div><small>현재가</small><b>${P(r.price)}</b> ${r.chg == null ? "" : `<span class="${r.chg >= 0 ? 'g' : 'r'} tg">${r.chg >= 0 ? "+" : ""}${r.chg.toFixed(1)}%</span>`}</div>
+      <div><small>시총</small><b>≈$${B(r.mcap)}</b></div><div><small>최근 60일</small>${spark(r.spark)}</div></div>
+    <div class="row"><i>판단</i>${r.tags.map(t => `<span class="tg ${tgc(t.level)}">${esc(t.name)} ${esc(t.level)}</span>`).join("") || '<span class="tg n">뚜렷한 동기 없음</span>'}</div>
+    <div class="row"><i>신호</i>${r.signals.map(s => `<span class="tg ${/분배/.test(s) ? 'r' : /매집|매수/.test(s) ? 'g' : 'v'}">${esc(s)}</span>`).join("") || '<span class="tg n">없음</span>'}</div>
+    ${r.summary ? `<p style="font-size:15px">${esc(r.summary)}</p>` : ""}
+    <p class="mut">매출 ${r.rev ? "$" + B(r.rev.val) + " (" + esc(r.rev_note) + ")" : "-"} · 순손익 ${r.ni ? (r.ni.val < 0 ? "-$" + B(-r.ni.val) : "$" + B(r.ni.val)) + " (" + esc(r.ni_note) + ")" : "-"}</p>
+    <div class="kv"><div><small>발행</small><b>${B(r.shares)}주</b></div><div><small>유통</small><b>${B(r.float)}주</b> ${r.shares && r.float ? `<span class="mut">(${(r.float / r.shares * 100).toFixed(0)}%)</span>` : ""}</div>
+      <div><small>주식 증가(5개월+)</small><b class="${r.growth > 0 ? 'r' : ''}">${r.growth == null ? "-" : (r.growth >= 0 ? "+" : "") + r.growth.toFixed(0) + "%"}</b></div><div><small>기준</small><b>${esc(r.shares_date || "-")}</b></div></div>
+    ${sp ? `<div class="box"><b>뉴스 반응 — 거래량 폭발 ${esc(sp.date)}</b> · 거래량 ${B(sp.vol)}주 (20일 평균 ${B(sp.avg20)}주의 ×${sp.x}) · 종가 ${sp.chg >= 0 ? "+" : ""}${sp.chg}% · 고가 대비 종가 -${sp.fade}% · 당일 공시: ${esc(sp.filing)}<br>
+      <b>손바뀜</b> · 폭발일 회전율 ×${sp.turn ?? "-"} (거래량÷유통주) · 7일 누적 ×${sp.turn7 ?? "-"} → <b>${esc(sp.verdict)}</b> · 폭발일 저가 ${sp.held ? "유지" : "이탈"}</div>` : ""}
+    <div class="mut">강도 <b style="color:var(--org)">${"▮".repeat(r.strength || 0)}</b> ${r.strength || 0}/5</div>`);
+
+  // 2. 진입 판단
+  const lad = r.levels.map(l => `<tr class="${l.kind}"><td>${P(l.px)}${l.kind === "now" ? "" : pc(l.pct)}</td><td>${esc(l.label)} ${l.tag ? `<span class="tg ${l.tag === '목표' ? 'b' : l.tag === '근접' ? 'o' : 'r'}">${esc(l.tag)}</span>` : ""}</td></tr>`).join("");
+  const baby = r.baby ? (r.baby.on ? `<div class="box" style="background:var(--redbg);color:var(--red)"><b>baby shelf 적용</b> · 공모 유통시총 $${B(r.baby.pub)} (<$75M) · S-3 연간 한도 약 $${B(r.baby.cap)} · 탈출가 ${P(r.baby.esc)} (${pcTxt(r.baby.esc, r.price)})</div>` : `<div class="box">공모 유통시총 $${B(r.baby.pub)} — baby shelf 아님 (선반 한도 제한 없음)</div>`) : "";
+  const raises = r.raises.length ? `<div class="box" style="border-left:4px solid var(--vio)"><b>과거 조달 패턴</b> <span class="tg v">${r.raises.length}회 (2년)</span><br>${r.raises.map(x => `${esc(x.date)} ${esc(x.form)} @${P(x.px)}${x.run != null ? ` · 직전 상승 ${x.run >= 0 ? "+" : ""}${x.run}%` : ""}${x.pr ? ` · 보도자료(${esc(x.pr)}) 뒤` : ""}`).join("<br>")}</div>` : "";
+  h += sec(2, "진입 판단", "가격 대역 · 희석 · 목적 가격을 함께 판정", `<table class="lad">${lad}</table>${baby}
+    <div class="pts">${r.score.map(s => `<div class="${s.pt > 0 ? 'p' : s.pt < 0 ? 'm' : 'z'}">${s.pt > 0 ? "+" : ""}${s.pt} ${esc(s.t)}</div>`).join("")}</div>${raises}`);
+
+  // 2-1. 희석 물량
+  const d = r.dil, bo = r.breakout;
+  h += sec("2-1", "희석 물량", "워런트·옵션·RSU·우선주·전환사채 — SEC XBRL 기준", `
+    <div class="mut">총 희석 가능 <b>${B(d.total)}주</b>${r.shares ? ` (발행의 ${(d.total / r.shares * 100).toFixed(0)}%)` : ""} · 지금 출회 가능 <b class="r">${B(d.now)}주</b>${d.conv_usd ? ` · 전환사채 $${B(d.conv_usd)}` : ""}</div>
+    ${d.rows.length ? `<table class="tbl"><tr><th>종류·보유자</th><th>수량</th><th>행사가</th><th>상태</th><th>비고</th></tr>${d.rows.map(x => `<tr><td><b>${esc(x.kind)}</b><br><span class="mut">${esc(x.holder)}</span></td><td class="num">${B(x.qty)}주</td><td class="num">${P(x.px)}${pc(x.px_pct)}</td><td style="color:${x.st === '출회 가능' ? 'var(--red)' : x.st === '근접' ? 'var(--org)' : 'inherit'};white-space:nowrap">${esc(x.st)}</td><td class="mut">${esc(x.note)}</td></tr>`).join("")}</table>` : '<p class="mut">XBRL에 신고된 희석 증권이 없어요 (해외기업이거나 미신고 — 10-Q 원문 확인)</p>'}
+    <div class="box"><b>상단 돌파 가능성</b> <span class="tg ${bo.verdict === '가능' ? 'g' : bo.verdict === '부담' ? 'r' : 'o'}">상단 돌파 ${esc(bo.verdict)}</span><br>
+      • 목표 ${bo.target ? `${P(bo.target.px)} (${esc(bo.target.label.split(" —")[0])}) — 현재가 대비 +${bo.target.pct}% 필요` : "위에 확인된 목표 없음"}<br>
+      • 최근 20일 고저폭 +${bo.range20 ?? "-"}%<br>
+      • 머리 위 물량(목표가 이하 출회 가능): ${B(bo.overhead)}주<br>
+      • 소화력: ${sp ? `${esc(sp.date)} 폭발일 거래량 ${B(sp.vol)}주 대비 ×${bo.absorb ?? 0}` : "폭발일 없음"} → <b>${bo.absorb == null ? "판단 보류" : bo.absorb <= 0.5 ? "소화 가능" : bo.absorb > 1.5 ? "부담" : "중간"}</b></div>`);
+
+  // 3. 런웨이
+  const rw = r.runway;
+  h += sec(3, "런웨이", "지금 상황", `<div class="g3">
+    <div><small>현금만</small><div class="big ${rw.months != null && rw.months < 6 ? 'r' : ''}" style="${rw.months != null && rw.months < 6 ? 'color:var(--red)' : ''}">${rw.months == null ? "-" : rw.months >= 99 ? "흑자" : rw.months.toFixed(1) + "개월"}</div><span class="mut">현금 $${B(rw.cash)} · 월 $${B(rw.burn)} 소진</span></div>
+    <div><small>자기자본</small><div class="big">${rw.equity == null ? "-" : (rw.equity < 0 ? "-$" + B(-rw.equity) : "$" + B(rw.equity))}</div><span class="mut">${rw.equity != null && rw.equity < 2.5e6 ? "나스닥 기준 $2.5M 미달" : ""}</span></div>
+    <div><small>현금 소진 예상</small><div class="big" style="font-size:16px">${esc(rw.empty || "-")}</div></div></div>`, "var(--red)");
+
+  // 4. 목적
+  h += sec(4, "목적", "펌핑해서 뭘 하려는가 — 큰 목적은 태그, 핵심은 아래", `
+    <div class="row">${r.purposes.map(p => `<span class="tg ${p.main ? 'o' : 'n'}">${p.main ? "★ " : ""}${esc(p.name)} ${esc(p.type)}</span>`).join("") || '<span class="tg n">뚜렷한 목적 없음</span>'}</div>
+    <div class="verdict"><b style="color:var(--org)">종합 판단${r.ai ? " (AI)" : ""}</b><br>${esc(r.verdict)}</div>
+    ${r.checks.length ? `<div class="chk"><b>추가 공시 확인 필요 — 확인 전엔 판단을 확정하지 않는다</b>${r.checks.map(c => `<div>• ${esc(c)}</div>`).join("")}</div>` : ""}
+    ${r.purposes.map(p => `<div class="pur"><div class="ph"><b>${esc(p.name)}</b><span class="tg ${p.type === '기한형' ? 'b' : 'v'}">${esc(p.type)}</span>${p.main ? '<span class="tg o">주 목적</span>' : ""}</div>
+      <div class="pg"><i>얼마까지</i><div>${p.upto ? `<b>${P(p.upto)}</b> ${p.upto_pct != null ? `<span class="tg g">${p.upto_pct >= 0 ? "+" : ""}${p.upto_pct}%</span>` : ""} ` : ""}<span class="mut">${esc(p.upto_note)}</span></div>
+      <i>언제까지</i><div>${esc(p.when || "-")} ${dday(p.dday)}</div><i>어떻게</i><div>${esc(p.how)}</div><i>그다음</i><div class="mut">${esc(p.then)}</div></div></div>`).join("")}`, "var(--org)");
+
+  // 5. 예정 이벤트
+  h += sec(5, "예정 이벤트", "상장 유지 기한·공시 마감·선반 롤링·실적", r.events.map(e => `<div class="ev"><div class="d">${esc(e.date)}${dday(e.d)}</div><div>${esc(e.t)}</div></div>`).join("") || '<p class="mut">확인된 일정 없음</p>', "var(--vio)");
+
+  // 6. 보유자·내부자
+  const ins = r.insiders || [], inst = r.inst || [];
+  h += sec(6, "보유자·내부자", "누가 띄우고 누가 던지나 — Yahoo 기관·내부자 거래 기준", `
+    <p class="mut">내부자 보유 ${r.pct_insider == null ? "-" : (r.pct_insider * 100).toFixed(1) + "%"} · 기관 보유 ${r.pct_inst == null ? "-" : (r.pct_inst * 100).toFixed(1) + "%"}</p>
+    ${inst.length ? `<table class="tbl"><tr><th>기관·펀드</th><th>지분</th><th>주식</th><th>보고일</th></tr>${inst.map(x => `<tr><td>${esc(x.name)}</td><td class="num">${x.pct == null ? "-" : (x.pct * 100).toFixed(2) + "%"}</td><td class="num">${B(x.shares)}</td><td class="num">${esc(x.date)}</td></tr>`).join("")}</table>` : ""}
+    ${ins.length ? `<table class="tbl" style="margin-top:10px"><tr><th>내부자</th><th>거래</th><th>주식</th><th>날짜</th></tr>${ins.map(x => `<tr><td><b>${esc(x.name)}</b><br><span class="mut">${esc(x.pos)}</span></td><td class="${x.act === '매수' ? 'g' : x.act === '매도' ? 'r' : ''}" style="color:${x.act === '매수' ? 'var(--grn)' : x.act === '매도' ? 'var(--red)' : 'inherit'}">${esc(x.act)}</td><td class="num">${B(x.shares)}</td><td class="num">${esc(x.date)}</td></tr>`).join("")}</table>` : '<p class="mut">최근 내부자 거래 기록 없음</p>'}`, "var(--blu)");
+
+  // 7. 메모
+  h += sec(7, "내 메모", "이 기기(브라우저)에만 저장돼요", `<textarea id="memo" placeholder="진입가·근거·관찰 포인트"></textarea>`, "var(--muted)");
+
+  // 8. 타임라인
+  h += sec(8, "타임라인", "공시 · 거래량", r.timeline.map(x => `<div class="tl"><div class="d">${esc(x.date)}</div><div><span class="tg ${x.kind === '거래량' ? 'o' : x.side === '악재' ? 'r' : x.side === '호재' ? 'g' : x.side === '주의' ? 'o' : 'n'}">${x.kind === '거래량' ? '거래량' : esc(x.side)}</span></div><div>${esc(x.t)} ${x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">원문</a>` : ""}</div></div>`).join("") || '<p class="mut">기록 없음</p>', "var(--muted)");
+  h += `<p class="mut" style="text-align:center">기계 판정이에요. 희석 물량·보유자는 SEC XBRL·Yahoo 기준이라 누락이 있을 수 있어요 — 원문으로 확인하세요.</p>`;
+  $("#m").innerHTML = h;
+  const k = "memo_" + r.t, m = $("#memo");
+  try { m.value = localStorage.getItem(k) || ""; } catch (e) {}
+  m.addEventListener("input", () => { try { localStorage.setItem(k, m.value); } catch (e) {} });
+}
+function pcTxt(a, b){ return a && b ? ((a / b - 1) * 100 >= 0 ? "+" : "") + ((a / b - 1) * 100).toFixed(0) + "%" : ""; }
+
+const t = new URLSearchParams(location.search).get("t") || "";
+if (!/^[A-Za-z0-9.\-]{1,10}$/.test(t)) { $("#m").innerHTML = '<div class="empty">종목이 지정되지 않았어요</div>'; }
+else fetch(`r/${encodeURIComponent(t.toUpperCase())}.json?v=${Date.now()}`).then(r => { if (!r.ok) throw 0; return r.json(); })
+  .then(render).catch(() => { $("#m").innerHTML = `<div class="empty">${esc(t)} 리포트가 아직 없어요.<br>워치리스트 상위·관심·후보 종목만 만들어져요.</div>`; });
+</script>
+</body>
+</html>
