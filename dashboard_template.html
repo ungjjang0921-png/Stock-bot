@@ -114,7 +114,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .prob em{font-style:normal;font-size:10.5px;color:var(--muted)}
 .prob .act{display:inline-block;margin-top:2px;font-size:11px;font-weight:700}
 .tabs{display:flex;gap:6px;margin-top:10px}
-.tab{flex:1;text-align:center;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:10px;padding:9px 4px;font-size:13.5px;font-weight:700;cursor:pointer}
+.tab{flex:1;text-align:center;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:10px;padding:9px 2px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
 .tab.on{border-color:var(--accent);color:var(--text);background:#0f2433}
 .hide{display:none!important}
 .cand{background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-bottom:12px;overflow:hidden}
@@ -142,13 +142,23 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .nws small{display:block;color:var(--muted);font-size:10.5px}
 .go{display:block;text-align:center;padding:9px;border-top:1px solid var(--line);color:var(--accent);font-size:12.5px;text-decoration:none}
 .intro{color:var(--muted);font-size:12px;line-height:1.55;margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#0d1622}
+.cday{margin:14px 0 6px;font-size:13px;font-weight:800;display:flex;justify-content:space-between}
+.cday span{color:var(--warn);font-family:var(--mono)}
+.crow{display:grid;grid-template-columns:62px 1fr;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 10px;margin-bottom:6px;cursor:pointer}
+.crow b{font-size:14px}.crow small{display:block;color:var(--muted);font-size:11px}
+.crow em{font-style:normal;font-weight:700;font-size:12.5px}
+.sc{width:100%;border-collapse:collapse;font-size:12px;font-family:var(--mono)}
+.sc th,.sc td{padding:7px 4px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+.sc th{color:var(--muted);font-weight:600;font-family:inherit}
+.sc td:first-child,.sc th:first-child{text-align:left;font-family:inherit}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:12px}
 </style>
 </head>
 <body>
 <header>
   <h1>🎯 펌핑 목적 워치리스트</h1>
   <div class="sub" id="sub"></div>
-  <div class="tabs" id="tabs"><span class="tab on" data-v="surge">🚀 급등 후보</span><span class="tab" data-v="jb">🎯 종배 예상</span><span class="tab" data-v="all">📋 전체</span></div>
+  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="surge">🚀 급등</span><span class="tab" data-v="jb">🎯 종배</span><span class="tab" data-v="cal">📅 일정</span><span class="tab" data-v="score">📊 성적</span></div>
   <div class="controls" id="ctl">
     <input id="q" placeholder="티커·회사명 검색" autocomplete="off">
     <select id="sort">
@@ -298,8 +308,7 @@ function card(it, i){
   </article>`;
 }
 
-let TAB = "surge";
-try { TAB = localStorage.getItem("wl_tab") || "surge"; } catch (e) {}
+let TAB = "all";   // 처음엔 기존 워치리스트 화면
 const kp = (label, v, sub, cls) => `<div><small>${label}</small><b class="${cls || ''}">${v}</b>${sub ? `<em>${sub}</em>` : ""}</div>`;
 const scn = lines => `<div class="scn">${lines.map(l => `<div><b class="s-${esc(l.k)}">${esc(l.k)}</b><span>${esc(l.t)}</span></div>`).join("")}</div>`;
 const news = ns => !ns || !ns.length ? "" : `<div class="nws">${ns.map(n => `<a href="${esc(n.link)}" target="_blank" rel="noopener"><i class="s-${esc(n.s)}">${esc(n.s)}</i>${esc(n.ko || n.title)}<small>${esc(n.pub)} · ${esc(n.when)}${n.dilute ? " · ⚠️ 희석 관련" : ""}</small></a>`).join("")}</div>`;
@@ -339,7 +348,6 @@ function openCard(t){
 function syncTabs(){
   document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x.dataset.v === TAB));
   $("#ctl").classList.toggle("hide", TAB !== "all"); $("#chips").classList.toggle("hide", TAB !== "all");
-  try { localStorage.setItem("wl_tab", TAB); } catch (e) {}
 }
 function render(){
   if (!DATA){ $("#list").innerHTML = '<div class="empty">데이터가 아직 없어요</div>'; return; }
@@ -348,6 +356,28 @@ function render(){
     $("#sub").textContent = `${DATA.updated} 업데이트 · 30분마다 갱신`;
     $("#list").innerHTML = `<div class="intro">🚀 <b>${esc(d)} 급등 후보</b> — 과거(본장 5년·프리장 2년) 비슷한 조건의 다음날 실제 급등 비율에 뉴스·공매도·유통물량·공시를 더해 고른 종목이에요. 확률은 과거 빈도이지 보장이 아니에요.</div>`
       + (xs.map(surgeCard).join("") || '<div class="empty">오늘은 조건에 맞는 급등 후보가 없어요</div>');
+    return;
+  }
+  if (TAB === "cal"){
+    const xs = DATA.cal || [];
+    $("#sub").textContent = `${DATA.updated} 업데이트 · 앞으로 14일`;
+    let h = `<div class="intro">📅 <b>예정 호재·이벤트</b> — 실적 발표일, FDA 심사일(PDUFA, 뉴스에서 찾은 것), $1 회복 기한, 분기보고 마감이에요. 기한이 다가오면 부양성 호재나 병합·증자 발표가 몰리는 경향이 있어요. 누르면 종목 상세로 가요.</div>`, last = "";
+    for (const e of xs){
+      if (e.label !== last){ h += `<div class="cday">${esc(e.label)}<span>${e.d === 0 ? "오늘" : "D-" + e.d}</span></div>`; last = e.label; }
+      h += `<div class="crow" onclick="openCard('${esc(e.t)}')"><b>${esc(e.t)}</b><div><em>${esc(e.ev)}</em><small>${esc(e.name)} · ${esc(e.note)}</small></div></div>`;
+    }
+    $("#list").innerHTML = xs.length ? h : h + '<div class="empty">14일 안에 확인된 일정이 없어요</div>';
+    return;
+  }
+  if (TAB === "score"){
+    const sc = DATA.score || {}, rows = sc.rows || [], rec = sc.recent || [];
+    const pc = v => v == null ? "-" : `<span class="${v >= 0 ? 'up' : 'dn'}">${v >= 0 ? "+" : ""}${v}%</span>`;
+    $("#sub").textContent = `${DATA.updated} 업데이트 · 텔레그램 /score 로도 확인`;
+    $("#list").innerHTML = `<div class="intro">📊 <b>알림 성적표</b> — 봇이 보낸 모든 알림을 <b>알림 당시 가격 대비 그날 최고·최저가</b>로 자동 채점해요. 다음 거래일에 채점되고, 채점 대기 ${sc.pending ?? 0}건이에요. 표본이 30건은 넘어야 믿을 만해요.</div>
+      <div class="box"><table class="sc"><tr><th>유형</th><th>건수</th><th>+10%</th><th>+20%</th><th>평균최고</th><th>평균최저</th></tr>
+      ${rows.map(r => `<tr><td>${esc(r.k)}</td><td>${r.n}</td><td>${r.hit10}%</td><td>${r.hit20}%</td><td>${pc(r.avg)}</td><td>${pc(r.dd)}</td></tr>`).join("") || '<tr><td colspan="6" style="text-align:center;color:var(--muted)">아직 채점된 알림이 없어요</td></tr>'}</table></div>
+      <div class="box"><table class="sc"><tr><th>최근 알림</th><th>시각</th><th>알림가</th><th>최고</th><th>최저</th></tr>
+      ${rec.map(r => `<tr><td><b>${esc(r.t)}</b> <small style="color:var(--muted)">${esc(r.k)}</small></td><td>${esc(r.at)}</td><td>${pfmt(r.price)}</td><td>${r.max == null ? "대기" : pc(r.max)}</td><td>${r.min == null ? "-" : pc(r.min)}</td></tr>`).join("") || '<tr><td colspan="5" style="text-align:center;color:var(--muted)">알림 기록 없음</td></tr>'}</table></div>`;
     return;
   }
   if (TAB === "jb"){

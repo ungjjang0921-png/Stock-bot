@@ -41,13 +41,11 @@ import yfinance as yf
 from ta.momentum import RSIIndicator
 
 import catalyst
-import guard
-import launch
 
 # ═════════════════════ 설정 ═════════════════════
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-DEFAULT_TICKERS: list[str] = []                 # 관심종목 (텔레그램 /add /del 로 관리)
+DEFAULT_TICKERS = ["AAPL", "TSLA", "NVDA"]       # 처음 기본값 (이후 /add /del 로 관리)
 
 # 1) 실시간 신호
 RSI_PERIOD = 14
@@ -189,8 +187,6 @@ HELP = ("🤖 <b>사용법</b>\n"
         "/scan — 매집 스캔 지금 실행\n"
         "/jongbae — 종배 후보 지금 실행\n"
         "/score — 알림 성적표 (유형별 적중률)\n"
-        "/launch — 소형주 출발 대기 후보 목록\n"
-        "/track — 추천 종목 설거지 감시 현황\n"
         + ("※ 명령은 5분 안에 반영돼요" if RUN_ONCE else "※ 실시간 서버 — 명령 즉시 반영"))
 
 
@@ -232,10 +228,6 @@ def process_updates(poll: int = 0) -> set[str]:
         elif cmd == "/jongbae":
             forced.add("jongbae")
             send("🎯 종배 후보를 분석해요. 몇 분 걸려요…")
-        elif cmd == "/track":
-            send(guard.track_text(STATE))
-        elif cmd == "/launch":
-            send(launch.list_text(STATE))
         elif cmd == "/score":
             send(catalyst.score_text(STATE))
         elif cmd in ("/start", "/help"):
@@ -929,7 +921,6 @@ def run_surge(sess: str) -> None:
             {"t": r["t"], "date": datetime.now(ET).date().isoformat(), "at": now_iso,
              "price": r["price"], "score": r["score"], "max_gain": None})
         catalyst.log_alert(STATE, "급등후보", r["t"], r["price"], score=r["score"])
-        guard.track(STATE, r["t"], r["price"], "급등후보")
     icon = "🌅" if sess == "프리장" else "🔔"
     kst = datetime.now(KST).strftime("%H:%M")
     msg = (f"🚀 <b>급등 후보</b> ({icon} {sess} {kst})\n"
@@ -988,10 +979,8 @@ def run_once(forced: set[str] | None = None, poll: bool = True) -> None:
             log.exception("뉴스 오류: %s", e)
 
     if dtime(4, 0) <= now.time() < dtime(20, 0):
-        for name, fn in (("촉매 감지", lambda: catalyst.scan_catalysts(STATE, send, translate_ko, STATE["tickers"] + list(STATE.get("track", {})))),
-                         ("점화 감지", lambda: catalyst.scan_ignition(STATE, send)),
-                         ("출발 감지", lambda: launch.scan(STATE, send)),
-                         ("설거지 감시", lambda: guard.watch(STATE, send))):
+        for name, fn in (("촉매 감지", lambda: catalyst.scan_catalysts(STATE, send, translate_ko, STATE["tickers"])),
+                         ("점화 감지", lambda: catalyst.scan_ignition(STATE, send))):
             try:
                 fn()
             except Exception as e:

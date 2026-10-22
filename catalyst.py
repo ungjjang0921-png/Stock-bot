@@ -428,10 +428,6 @@ def scan_catalysts(state: dict, send, translate, watch: list[str]) -> None:
                  f"💬 {html.escape(ko)}\n{mkt}{link}\n⚠️ 급등 중 증자·희석 공시 = 물량 출회 위험")
             log_alert(state, "희석경고", t, price)
             continue
-        import guard
-        ok, bad, ginfo = guard.pre_check(t, price or 0, chg) if price else (True, [], {"upside": None})
-        if not ok:
-            continue                                     # 호재여도 설거지 위험이면 제외
         labels = " · ".join(h[0] for h in hits[:2])
         icon = {"S": "🔥🔥", "A": "🔥", "B": "📰"}[grade]
         send(f"{icon} <b>촉매 포착 [{grade}]</b> {t} · {html.escape(labels)}\n"
@@ -440,7 +436,6 @@ def scan_catalysts(state: dict, send, translate, watch: list[str]) -> None:
              f"⚡ 거래량이 붙는지 확인 후 대응 — 재료만으로 오르지 않을 수 있어요")
         recent[t] = {"label": labels, "grade": grade, "ts": now.isoformat(), "title": ko[:80], "src": it["src"]}
         log_alert(state, "촉매", t, price, grade=grade, cat=hits[0][0] if hits else "")
-        guard.track(state, t, price, "촉매")
 
 
 # ───────────────── 4. 거래량 점화 감지 ─────────────────
@@ -500,22 +495,12 @@ def scan_ignition(state: dict, send) -> None:
     state["ign_prev"] = {r["t"]: list(live(r, now_et)[::2]) for r in rows if live(r, now_et)[0]}
     state["ign_prev_at"] = now.isoformat()
     hits.sort(key=lambda h: -h[0])
-    import guard
-    sent_n = 0
-    for prio, t, r, price, chg, vol, fl, avg, why, cat in hits:
-        if sent_n >= IGN_PER_RUN:
-            break
-        ok, bad, ginfo = guard.pre_check(t, price, chg)
-        if not ok:
-            continue                                     # 설거지 위험 → 제외
-        sent_n += 1
+    for prio, t, r, price, chg, vol, fl, avg, why, cat in hits[:IGN_PER_RUN]:
         done_today.append(t)
         rel = f" · 평소의 {vol / avg:.1f}배" if avg else ""
         tag = (f"\n🧨 <b>재료+수급 동시</b>: [{cat['grade']}] {html.escape(cat['label'])} — {html.escape(cat['title'])}"
                if cat else "\n❔ 재료 미확인 — 뉴스 없이 오르면 설거지 주의")
         send(f"⚡ <b>점화 포착</b> {t} ({sess} {chg:+.1f}%)\n"
              f"💰 {_p(price)} · {why}\n📦 누적 {_big(vol)}{rel} · 유통 {_big(fl)}{tag}\n"
-             f"{guard.upside_line(ginfo)}\n🛑 손절 참고 {_p(price * 0.92)} (-8%)\n"
              f"📊 {stat_line(state, '점화')}")
         log_alert(state, "점화", t, price, combo=bool(cat))
-        guard.track(state, t, price, "점화")

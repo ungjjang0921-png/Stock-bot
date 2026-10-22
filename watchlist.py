@@ -1009,6 +1009,112 @@ def build_candidates(items, prices, frames, jb):
     return [c for c in surge if c["score"] >= MIN_SCORE][:SURGE_TOP], [c for c in jbc if c["score"] >= MIN_SCORE][:JB_TOP]
 
 
+# ───────────────── 5-4. 예정 호재 캘린더 + 알림 성적표 ─────────────────
+CAL_TOP = 60
+CAL_DAYS = 14
+MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December"
+PDUFA_RE = re.compile(r"PDUFA[^.]{0,120}?((?:%s)\s+\d{1,2},\s+\d{4})" % MONTHS, re.I)
+BIO_RE = re.compile(r"therapeut|pharma|bio|medic|oncolog|genetic|vaccin|clinical", re.I)
+
+
+def _events_for(t: str, name: str) -> list[dict]:
+    out = []
+    tk = yf.Ticker(t)
+    try:
+        cal = tk.calendar or {}
+        eds = cal.get("Earnings Date") if isinstance(cal, dict) else None
+        for d in (eds or [])[:1]:
+            d = d if isinstance(d, date) else pd.Timestamp(d).date()
+            out.append({"date": d.isoformat(), "ev": "실적 발표", "note": "서프라이즈 시 급등·급락"})
+    except Exception:
+        pass
+    if BIO_RE.search(name or ""):
+        try:
+            for it in (tk.news or [])[:20]:
+                c = it.get("content") or it
+                text = (c.get("title") or "") + " " + (c.get("summary") or "")
+                for m in PDUFA_RE.finditer(text):
+                    try:
+                        d = datetime.strptime(m.group(1).replace("  ", " "), "%B %d, %Y").date()
+                        out.append({"date": d.isoformat(), "ev": "FDA 심사일(PDUFA)", "note": "승인 시 대형 급등 재료"})
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+    return out
+
+
+def build_calendar(items, surge, jbc) -> list[dict]:
+    today = datetime.now(ET).date()
+    cache = cache_load("cal")
+    picks = [it for it in items[:CAL_TOP]]
+    extra = {c["t"] for c in (surge or []) + (jbc or [])} | {it["t"] for it in items if it.get("watch")}
+    picks += [it for it in items if it["t"] in extra and it not in picks]
+    ev = []
+    for it in picks:
+        t = it["t"]
+        if t not in cache:
+            try:
+                cache[t] = _events_for(t, it["name"])
+            except Exception:
+                cache[t] = []
+        for e in cache[t]:
+            ev.append({"t": t, "name": it["name"], **e})
+    for it in items:                              # 공시 기반 기한 (모든 종목)
+        for d in it.get("ddays", []):
+            ev.append({"t": it["t"], "name": it["name"], "date": d["date"], "ev": d["label"],
+                       "note": "기한 전 부양성 호재·병합 발표 잦음" if "회복" in d["label"] else "공시 마감 전후 증자·실적 발표"})
+    seen, out = set(), []
+    for e in sorted(ev, key=lambda e: (e["date"], e["t"])):
+        try:
+            d = date.fromisoformat(e["date"])
+        except ValueError:
+            continue
+        k = (e["t"], e["ev"], e["date"])
+        if k in seen or not (0 <= (d - today).days <= CAL_DAYS):
+            continue
+        seen.add(k)
+        e["d"] = (d - today).days
+        e["label"] = f"{d.month}/{d.day}({WEEK[d.weekday()]})"
+        out.append(e)
+    return out
+
+
+def scorecard() -> dict:
+    try:
+        st = json.loads((ROOT / "state.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    logs = st.get("alog", [])
+    done = [e for e in logs if e.get("max_gain") is not None]
+
+    def agg(xs):
+        g = sorted(e["max_gain"] for e in xs)
+        if not g:
+            return None
+        dd = [e["min_gain"] for e in xs if e.get("min_gain") is not None]
+        return {"n": len(g), "hit10": round(sum(x >= 10 for x in g) / len(g) * 100), "hit20": round(sum(x >= 20 for x in g) / len(g) * 100),
+                "avg": round(sum(g) / len(g), 1), "med": g[len(g) // 2], "dd": round(sum(dd) / len(dd), 1) if dd else None}
+    rows = []
+    for k in sorted({e["kind"] for e in done}):
+        a = agg([e for e in done if e["kind"] == k])
+        if a:
+            rows.append({"k": k, **a})
+    for g in ("S", "A", "B"):
+        a = agg([e for e in done if e["kind"] == "촉매" and e.get("grade") == g])
+        if a:
+            rows.append({"k": f"촉매 {g}등급", **a})
+    a = agg([e for e in done if e["kind"] == "점화" and e.get("combo")])
+    if a:
+        rows.append({"k": "점화(재료+수급)", **a})
+    recent = []
+    for e in reversed(logs[-40:]):
+        recent.append({"t": e["t"], "k": e["kind"] + (f" {e['grade']}" if e.get("grade") else ""),
+                       "at": datetime.fromisoformat(e["at"]).astimezone(KST).strftime("%m/%d %H:%M"),
+                       "price": e["price"], "max": e.get("max_gain"), "min": e.get("min_gain")})
+    return {"rows": rows, "recent": recent, "pending": sum(1 for e in logs if e.get("max_gain") is None and not e.get("checked"))}
+
+
 # ───────────────── 6. AI 종합판단 (선택) ─────────────────
 def ai_summary(item: dict) -> str:
     if not ANTHROPIC_KEY:
@@ -1033,6 +1139,7 @@ def ai_summary(item: dict) -> str:
 
 # ───────────────── 6-2. 하루 캐시 (30분 갱신 시 큰 데이터 재다운로드 방지) ─────────────────
 _CACHE: dict = {}
+CALENDAR: list = []
 
 
 def _cday() -> str:
@@ -1150,6 +1257,11 @@ def analyze() -> list[dict]:
     for it in items[:AI_TOP]:
         it["ai"] = ai_summary(it)
     surge, jbc = build_candidates(items, prices, frames, jb_m)
+    global CALENDAR
+    try:
+        CALENDAR = build_calendar(items, surge, jbc)
+    except Exception as e:
+        log.warning("캘린더 실패: %s", e)
     save_caches()
     return items, surge, jbc
 
@@ -1175,6 +1287,7 @@ def write_page(items: list[dict], surge=None, jbc=None) -> None:
     tpl = (ROOT / "dashboard_template.html").read_text(encoding="utf-8")
     payload = _clean({"updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"), "items": items,
                       "forward": FORWARD_DAYS, "surge": surge or [], "jbc": jbc or [],
+                      "cal": CALENDAR, "score": scorecard(),
                       "rules": {"reg": int(SURGE_REG * 100), "pre": int(SURGE_PRE * 100), "jb": int(JB_HIT * 100)}})
     data = json.dumps(payload, ensure_ascii=False, default=lambda o: None).replace("</", "<\\/")
     OUT.parent.mkdir(parents=True, exist_ok=True)
