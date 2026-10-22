@@ -2,9 +2,7 @@ name: watchlist
 
 on:
   schedule:
-    - cron: "31 12 * * 1-5"   # 프리장 (한국시간 밤 9:31)
-    - cron: "41 16 * * 1-5"   # 장중 (새벽 1:41)
-    - cron: "51 20 * * 1-5"   # 마감 직전 (새벽 5:51)
+    - cron: "11,41 8-20 * * 1-5"   # 30분마다 (한국시간 오후 5:11 ~ 새벽 5:41)
   workflow_dispatch:
 
 permissions:
@@ -22,6 +20,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: actions/cache@v4          # 5년 일봉·프리장·SEC 데이터를 하루 동안 재사용
+        with:
+          path: .cache
+          key: wl-${{ github.run_id }}
+          restore-keys: wl-
       - run: pip install yfinance pandas numpy requests
       - run: python watchlist.py
         env:
