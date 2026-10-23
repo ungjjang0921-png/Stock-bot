@@ -199,6 +199,7 @@ def run(prices: dict[str, pd.DataFrame], info: dict[str, dict], cutoff: date, lo
         lab = A.dropna(subset=[gcol])
         ldates = sorted(lab.index.get_level_values("date").unique())
         if len(ldates) < EVAL_DAYS + 100:
+            log.warning("%d거래일 예측: 데이터 부족 (%d일)", H, len(ldates))
             continue
         ev_start = ldates[-EVAL_DAYS]
         tr = lab[lab.index.get_level_values("date") < ev_start - timedelta(days=H * 2)]

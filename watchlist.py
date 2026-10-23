@@ -34,6 +34,7 @@ import pandas as pd
 import requests
 import yfinance as yf
 
+import predict as predmod
 import report
 
 # ═════════════════════ 설정 ═════════════════════
@@ -1335,6 +1336,7 @@ def ai_view(txt: str) -> tuple[dict | None, str]:
 # ───────────────── 6-2. 하루 캐시 (30분 갱신 시 큰 데이터 재다운로드 방지) ─────────────────
 _CACHE: dict = {}
 CALENDAR: list = []
+PRED: dict = {}
 FS_ALL: dict = {}
 PRICES: dict = {}
 REPORTS: list = []
@@ -1652,11 +1654,6 @@ def analyze() -> list[dict]:
         except Exception as e:
             log.warning("%s 분석 실패: %s", t, e)
     items.sort(key=lambda x: x["total"], reverse=True)
-    ai_pick = items[:AI_TOP]
-    for it in ai_pick:
-        if time_left() < 300:
-            break
-        it["ai_view"], it["ai"] = ai_view(ai_summary(it, prices.get(it["t"])))
     surge, jbc = build_candidates(items, prices, frames, jb_m)
     global CALENDAR, FEED, DILUTION
     for name, fn in (("캘린더", lambda: build_calendar(items, surge, jbc)), ("공시", lambda: build_feed(items)),
@@ -1696,7 +1693,7 @@ def write_page(items: list[dict], surge=None, jbc=None) -> None:
     tpl = (ROOT / "dashboard_template.html").read_text(encoding="utf-8")
     payload = _clean({"updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"), "items": items,
                       "forward": FORWARD_DAYS, "surge": surge or [], "jbc": jbc or [],
-                      "cal": CALENDAR, "dil": DILUTION, "reports": REPORTS,
+                      "cal": CALENDAR, "dil": DILUTION, "pred": PRED,
                       "rules": {"reg": int(SURGE_REG * 100), "pre": int(SURGE_PRE * 100), "jb": int(JB_HIT * 100)}})
     data = json.dumps(payload, ensure_ascii=False, default=lambda o: None).replace("</", "<\\/")
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -1760,6 +1757,31 @@ def main():
     if not items:
         log.error("분석 결과 없음")
         return
+    global PRED
+    if time_left() <= 240:
+        log.warning("시간 부족으로 예측 생략 (남은 %.0f초)", time_left())
+    else:
+        try:
+            fx = None
+            try:
+                fx = float(yf.Ticker("KRW=X").history(period="5d")["Close"].dropna().iloc[-1])
+            except Exception:
+                pass
+            t_p = time.time()
+            dil_hi = {d["t"] for d in DILUTION if d["risk"] == "높음"}
+            RISKY = ("ATM·공모", "공모 준비", "물량 출회", "공시 지연")
+            info = {it["t"]: {"name": it["name"],
+                              "risk": [t["name"] for t in it["tags"] if t["name"] in RISKY]
+                              + (["희석 위험 높음"] if it["t"] in dil_hi else [])} for it in items}
+            PRED = predmod.run(PRICES, info, target_session(),
+                               OUT.parent / "pred_log.json", fx)
+            log.info("예측 모델 %.0f초 · 기간 %s", time.time() - t_p, list((PRED or {}).get("horizons", {})))
+        except Exception as e:
+            log.exception("예측 실패: %s", e)
+    for it in items[:AI_TOP]:                       # AI 판단은 예측 다음 (시간 남는 만큼)
+        if time_left() < 150:
+            break
+        it["ai_view"], it["ai"] = ai_view(ai_summary(it, PRICES.get(it["t"])))
     import shutil                                   # 상세 리포트 기능 삭제 — 남은 파일 정리
     shutil.rmtree(OUT.parent / "r", ignore_errors=True)
     (OUT.parent / "r.html").unlink(missing_ok=True)
