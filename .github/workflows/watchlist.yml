@@ -2,7 +2,7 @@ name: watchlist
 
 on:
   schedule:
-    - cron: "11,41 8-20 * * 1-5"   # 30분마다 (한국시간 오후 5:11 ~ 새벽 5:41)
+    - cron: "11,41 8-20 * * 1-5"
   workflow_dispatch:
 
 permissions:
@@ -10,29 +10,36 @@ permissions:
 
 concurrency:
   group: watchlist
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: actions/cache@v4          # 5년 일봉·프리장·SEC 데이터를 하루 동안 재사용
+      - uses: actions/cache/restore@v4
         with:
           path: .cache
           key: wl-${{ github.run_id }}
           restore-keys: wl-
-      - run: pip install yfinance pandas numpy requests
+      - run: pip install yfinance pandas numpy requests scikit-learn
       - run: python watchlist.py
+        timeout-minutes: 25
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           SEC_EMAIL: ${{ secrets.SEC_EMAIL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .cache
+          key: wl-${{ github.run_id }}
       - name: publish
         if: always()
         run: |
