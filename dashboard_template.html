@@ -113,7 +113,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .prob .pb i{display:block;height:100%;border-radius:3px;background:var(--good)}
 .prob em{font-style:normal;font-size:10.5px;color:var(--muted)}
 .prob .act{display:inline-block;margin-top:2px;font-size:11px;font-weight:700}
-.tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-top:10px}
+.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:10px}
 .tab{flex:1;text-align:center;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:10px;padding:9px 2px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
 .tab.on{border-color:var(--accent);color:var(--text);background:#0f2433}
 .hide{display:none!important}
@@ -172,13 +172,28 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .aiv b{font-size:12px;border-radius:6px;padding:2px 8px;white-space:nowrap}
 .aiv .s-긍정{background:#10301f;color:#6be3a4}.aiv .s-중립{background:#22262e;color:#c9d3df}.aiv .s-부정{background:#3a1519;color:#ff8f8f}
 .aiv i{font-style:normal;font-family:var(--mono);color:var(--muted);white-space:nowrap}
+.hz{display:flex;gap:6px;margin:0 0 10px}.hz span{flex:1;text-align:center;border:1px solid var(--line);border-radius:8px;padding:7px 0;font-size:12.5px;color:var(--muted);cursor:pointer}
+.hz span.on{border-color:var(--accent);color:var(--text);background:#0f2433}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.cmp>div{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px}
+.cmp>div.nw{border-color:var(--accent)}
+.cmp h4{margin:0 0 4px;font-size:12px;color:var(--muted);font-weight:600}.cmp .r{font-family:var(--mono);font-size:24px;font-weight:800}
+.cmp small{display:block;color:var(--muted);font-size:11px;line-height:1.5}.cmp b{color:var(--text)}
+.pc{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.pc .h{display:flex;justify-content:space-between;align-items:baseline}.pc .h b{font-size:15px}
+.pc .h small{color:var(--muted);font-size:11px;margin-left:6px}
+.pc .g{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px;font-size:11px;color:var(--muted)}
+.pc .g b{display:block;font-family:var(--mono);font-size:13.5px;color:var(--text)}
+.pc .wy{margin-top:6px;font-size:11.5px;color:var(--muted)}
+.rs{font-size:11px;font-weight:800;border-radius:6px;padding:2px 7px}
+.rs.적중{background:#10301f;color:#6be3a4}.rs.미적중{background:#3a1519;color:#ff8f8f}.rs.관찰{background:#22262e;color:#c9d3df}
 </style>
 </head>
 <body>
 <header>
   <h1>🎯 펌핑 목적 워치리스트</h1>
   <div class="sub" id="sub"></div>
-  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="surge">🚀 급등</span><span class="tab" data-v="jb">🎯 종배</span><span class="tab" data-v="cal">📅 일정</span><span class="tab" data-v="dil">💧 희석</span></div>
+  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="surge">🚀 급등</span><span class="tab" data-v="jb">🎯 종배</span><span class="tab" data-v="pred">🔮 예측</span><span class="tab" data-v="cal">📅 일정</span><span class="tab" data-v="dil">💧 희석</span></div>
   <div class="controls" id="ctl">
     <input id="q" placeholder="티커·회사명 검색" autocomplete="off">
     <select id="sort">
@@ -386,6 +401,46 @@ function render(){
     $("#sub").textContent = `${DATA.updated} 업데이트 · 30분마다 갱신`;
     $("#list").innerHTML = `<div class="intro">🚀 <b>${esc(d)} 급등 후보</b> — 과거(본장 5년·프리장 2년) 비슷한 조건의 다음날 실제 급등 비율에 뉴스·공매도·유통물량·공시를 더해 고른 종목이에요. 확률은 과거 빈도이지 보장이 아니에요.</div>`
       + (xs.map(surgeCard).join("") || '<div class="empty">오늘은 조건에 맞는 급등 후보가 없어요</div>');
+    return;
+  }
+  if (TAB === "pred"){
+    const P = DATA.pred || {}, hzs = P.horizons || {};
+    window.PH = window.PH || "10";
+    const lab = {"1": "다음 거래일", "5": "5거래일", "10": "10거래일"};
+    const z = hzs[PH];
+    const krw = v => P.fx && v ? Math.round(v * P.fx).toLocaleString() + "원" : "";
+    const m = (x, title, cls, sub) => !x || !x.n ? `<div class="${cls}"><h4>${title}</h4><div class="r">-</div><small>검증 데이터 부족</small></div>` :
+      `<div class="${cls}"><h4>${title} <span style="float:right">${sub}</span></h4><div class="r">${x.rate}%</div>
+       <small>적중 <b>${x.k}</b> / 평가 ${x.n}</small><small>95% 참고 구간 <b>${x.lo}% ~ ${x.hi}%</b></small>
+       <small>고점 평균 오차 <b>${x.pk_err ?? "-"}%p</b> · 날짜 오차 <b>${x.dd_err ?? "-"}거래일</b></small><small>실제 급등 ${x.nh}건 기준</small></div>`;
+    let h = `<div class="intro">🔮 <b>급등 예측</b> — ${P.asof ? esc(P.asof) + " 미국 종가 기준" : ""}. 목표: ${z ? `${lab[PH]} 안에 고가 <b>+${z.th}%</b> 터치` : ""}.<br><b>판별 점수는 확률이 아니에요.</b> 학습에 쓰지 않은 최근 60거래일로 검증해서 표본이 충분한 점수대만 확률을 표시해요.</div>
+      <div class="hz">${["1","5","10"].map(k => `<span class="${PH === k ? 'on' : ''}" onclick="PH='${k}';render()">${lab[k]}</span>`).join("")}</div>`;
+    if (!z){ $("#list").innerHTML = h + '<div class="empty">예측 데이터가 아직 없어요 (다음 갱신 때 생성)</div>'; return; }
+    const lift = z.new && z.old && z.old.rate ? ` · 기존 대비 ${(z.new.rate / z.old.rate).toFixed(1)}배` : "";
+    h += `<div style="font-weight:800;margin:6px 0">같은 조건의 성능 비교 <span class="mut" style="font-weight:400;font-size:11.5px">${esc(z.eval_from)}~ · 매일 상위 ${10}개 · 무작위 ${z.base}%</span></div>
+      <div class="cmp">${m(z.old, "기존 방식", "", "유사 조건 빈도")}${m(z.new, "개선 모델", "nw", "성공·실패 학습")}</div>
+      <div class="mut" style="font-size:11.5px;margin-bottom:12px">개선 모델${lift} · 학습 ${z.train_n.toLocaleString()}일 중 급등 ${z.train_pos.toLocaleString()}건 · 급등 시 중앙 고점 +${z.pk_med}% · 중앙 ${z.dd_med}거래일 뒤<br>${z.rsi_stat && z.rsi_stat.zone != null ? `📉 <b style="color:var(--text)">RSI 20 근처</b>(12~28) 급등률 <b style="color:var(--text)">${z.rsi_stat.zone}%</b> vs 전체 ${z.rsi_stat.all}% (5년 ${z.rsi_stat.n.toLocaleString()}일) · ATM·상폐 위험 종목은 RSI 무시<br>` : ""}급등한 경우 중 목표의 2배(+${z.th * 2}%) 이상 간 비율 ${z.big}% · 고점은 종목별로 따로 예측<br>주요 판단 근거: ${z.imp.map(x => `${esc(x.f)}${x.w > 0 ? "↑" : "↓"}`).join(" · ")}</div>
+      <div class="box" style="background:${z.sure ? '#10301f' : '#22262e'};border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:10px;font-size:12.5px">
+        ${z.sure ? `🎯 <b>확실 후보 기준</b> — 판별 상위 ${(100 - z.sure_cut).toFixed(1)}% · 검증 적중률 <b style="font-size:16px">${z.sure.p}%</b> (${z.sure.n}건 · 95% 하한 ${z.sure.lo}%, 무작위 ${z.base}%의 ${(z.sure.p / z.base).toFixed(1)}배) · 증자·희석 위험 종목 제외`
+                 : `⚠️ 이 기간은 검증상 <b>확실하다고 볼 만한 점수대가 없어요</b> (95% 하한이 무작위의 2배 미만). 아래는 참고용 순위예요.`}
+        <div class="mut" style="margin-top:4px">모델 비교: ${Object.entries(z.models || {}).map(([k, v]) => `${esc(k)} ${v.rate ?? "-"}%`).join(" · ")} → <b style="color:var(--text)">${esc(z.model || "")}</b> 사용</div></div>
+      <div class="seg">${[["sure", `🎯 확실 후보 ${z.cands.filter(c => c.sure).length}`], ["all", `전체 ${z.cands.length}`]].map(([k, l]) => `<span class="${(window.PS || "sure") === k ? 'on' : ''}" onclick="PS='${k}';render()">${l}</span>`).join("")}</div>`;
+    const shown = (window.PS || "sure") === "sure" ? z.cands.filter(c => c.sure) : z.cands;
+    if (!shown.length) h += '<div class="empty">오늘은 확실 후보가 없어요 — 억지로 고르지 않아요. "전체"에서 참고 순위를 볼 수 있어요.</div>';
+    h += shown.map((c, i) => `<div class="pc" onclick="openCard('${esc(c.t)}')"><div class="h"><div><b>${i + 1}. ${esc(c.t)}</b><small>${esc((c.name || "").slice(0, 26))}</small></div>
+        <span class="tg ${c.sure ? 't-grn' : c.risk && c.risk.length ? 't-red' : ''}" style="font-size:11px">${c.sure ? "🎯 " : ""}판별 ${c.score}점 · ${c.prob != null ? "검증 " + c.prob + "%" : "확률 미제시"}</span></div>
+      <div class="g"><div>현재가<b>${pfmt(c.px)}</b>${krw(c.px)} <span class="${c.chg >= 0 ? 'up' : 'dn'}">${c.chg >= 0 ? "+" : ""}${c.chg}%</span></div>
+        <div>조건부 고점<b class="up">${pfmt(c.peak)}</b>여력 +${c.up}%</div><div>조건부 예상일<b>${esc(c.day.slice(5))}</b>미국</div></div>
+      ${c.why.length ? `<div class="wy">${c.rsi20 ? `<b style="color:#6be3a4">📉 RSI ${c.rsi} — 20 근처</b> · ` : `RSI ${c.rsi} · `}근거: ${c.why.map(esc).join(" · ")}</div>` : ""}${c.risk && c.risk.length ? `<div class="wy" style="color:#ff8f8f">⚠️ 제외 사유: ${c.risk.map(esc).join(" · ")}</div>` : ""}</div>`).join("");
+    const L = (P.ledger || []).filter(e => String(e.h) === PH), st = (P.ledger_stat || {})[PH];
+    h += `<div style="font-weight:800;margin:16px 0 6px">${lab[PH]} 이내 · 고정된 예측과 실제 결과</div>
+      <div class="mut" style="font-size:11.5px;margin-bottom:6px">${st ? `누적 적중 <b style="color:var(--text)">${st.rate}%</b> (${st.k}/${st.n}) · 95% ${st.lo}~${st.hi}%${st.sure ? ` · 🎯 확실 후보만 <b style="color:var(--text)">${st.sure.rate}%</b> (${st.sure.k}/${st.sure.n})` : ""}` : "아직 기간이 끝난 예측이 없어요 — 매일 상위 20개를 고정 저장해 채점해요"}</div>`;
+    h += L.slice(0, 40).map(e => `<div class="pc"><div class="h"><div><b>${e.sure ? "🎯 " : ""}${esc(e.t)}</b><small>${esc(e.asof)} 기준 · ${e.rank}위</small></div>
+        <span class="rs ${e.res === '적중' ? '적중' : e.res === '미적중' ? '미적중' : '관찰'}">${e.res ? (e.res === '적중' ? '급등 적중' : esc(e.res)) : '대기'}</span></div>
+      <div class="g"><div>기준가<b>${pfmt(e.ref)}</b></div><div>예상 고점<b>${pfmt(e.peak)}</b>${esc(e.day.slice(5))}</div>
+        <div>실제 고점<b class="${e.act_peak >= e.ref * (1 + e.th / 100) ? 'up' : ''}">${e.act_peak ? pfmt(e.act_peak) : "-"}</b>${e.act_peak ? (((e.act_peak / e.ref - 1) * 100 >= 0 ? "+" : "") + ((e.act_peak / e.ref - 1) * 100).toFixed(1) + "% · " + esc((e.act_day || "").slice(5))) : ""}</div></div></div>`).join("");
+    $("#sub").textContent = `${DATA.updated} 업데이트`;
+    $("#list").innerHTML = h;
     return;
   }
   if (TAB === "cal"){
