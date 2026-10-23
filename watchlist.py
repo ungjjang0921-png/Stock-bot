@@ -1295,7 +1295,10 @@ def ai_summary(item: dict, df=None) -> str:
             pass
     prompt = (
         "너는 미국 나스닥 소형주(펌핑·희석) 전문 분석가다. 아래 데이터만 근거로 한국어로 분석하라.\n"
-        "형식(각 항목 제목 그대로, 항목마다 1~3문장, 숫자·날짜·가격을 구체적으로):\n"
+        "맨 첫 줄은 반드시 다음 형식 한 줄: 관점=긍정|중립|부정; 점수=0~100; 확신=높음|보통|낮음; 한줄=(20자 내외 결론)\n"
+        "  - 관점은 '앞으로 며칠 안에 단기 급등이 나올 가능성 대비 설거지·희석 위험'을 저울질한 AI 자신의 시각이다.\n"
+        "그다음 형식(각 항목 제목 그대로, 항목마다 1~3문장, 숫자·날짜·가격을 구체적으로):\n"
+        "🧠 AI 관점: 왜 그렇게 보는지, 무엇이 바뀌면 관점이 바뀌는지\n"
         "🎯 핵심 목적: 현금조달/상장유지/물량출회/병합 중 무엇이 주 목적인지와 근거\n"
         "📈 상승 시나리오: 띄운다면 어디까지(가격·%)와 계기(재료·기한)\n"
         "📉 하락·설거지 시나리오: 조달·출회가 나오면 어떻게 되는지, 경고 신호\n"
@@ -1304,10 +1307,29 @@ def ai_summary(item: dict, df=None) -> str:
         "🔍 확인할 공시: 다음에 확인해야 할 공시나 이벤트\n"
         "규칙: 데이터에 없는 사실은 지어내지 말고 '확인 필요'라고 써라. 매수·매도 권유 문장은 쓰지 마라.\n\n"
         + json.dumps(_clean(facts), ensure_ascii=False, default=str)[:9000])
-    txt = llm(prompt, 900)
+    txt = llm(prompt, 1000)
     if txt:
         c[key] = txt
     return txt
+
+
+def ai_view(txt: str) -> tuple[dict | None, str]:
+    """첫 줄 '관점=..; 점수=..; 확신=..; 한줄=..' 을 뽑아내고 본문과 분리"""
+    if not txt:
+        return None, ""
+    lines = txt.strip().splitlines()
+    for i, ln in enumerate(lines[:3]):
+        if "관점" in ln and "점수" in ln:
+            d = {}
+            for part in re.split(r"[;|·]\s*(?=[가-힣]+\s*=)", ln.replace("*", "")):
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    d[k.strip()] = v.strip()
+            view = {"stance": next((x for x in ("긍정", "중립", "부정") if x in d.get("관점", "")), "중립"),
+                    "score": int(m.group()) if (m := re.search(r"\d+", d.get("점수", ""))) else None,
+                    "conf": d.get("확신", ""), "line": d.get("한줄", "").strip(" ()")}
+            return view, "\n".join(lines[:i] + lines[i + 1:]).strip()
+    return None, txt
 
 
 # ───────────────── 6-2. 하루 캐시 (30분 갱신 시 큰 데이터 재다운로드 방지) ─────────────────
@@ -1634,7 +1656,7 @@ def analyze() -> list[dict]:
     for it in ai_pick:
         if time_left() < 300:
             break
-        it["ai"] = ai_summary(it, prices.get(it["t"]))
+        it["ai_view"], it["ai"] = ai_view(ai_summary(it, prices.get(it["t"])))
     surge, jbc = build_candidates(items, prices, frames, jb_m)
     global CALENDAR, FEED, DILUTION
     for name, fn in (("캘린더", lambda: build_calendar(items, surge, jbc)), ("공시", lambda: build_feed(items)),

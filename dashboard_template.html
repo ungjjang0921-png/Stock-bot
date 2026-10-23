@@ -168,6 +168,10 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .drow .dg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px;font-size:11px;color:var(--muted)}
 .drow .dg b{display:block;font-family:var(--mono);font-size:14px;color:var(--text)}
 .rep{display:block;text-align:center;margin:0 0 12px;padding:10px;border-radius:10px;background:#0f2433;border:1px solid var(--accent);color:var(--accent);font-weight:700;text-decoration:none}
+.aiv{display:flex;align-items:center;gap:8px;margin:0 12px 10px;padding:8px 10px;border-radius:10px;border:1px solid #3e3566;background:#1a1830;font-size:12.5px}
+.aiv b{font-size:12px;border-radius:6px;padding:2px 8px;white-space:nowrap}
+.aiv .s-긍정{background:#10301f;color:#6be3a4}.aiv .s-중립{background:#22262e;color:#c9d3df}.aiv .s-부정{background:#3a1519;color:#ff8f8f}
+.aiv i{font-style:normal;font-family:var(--mono);color:var(--muted);white-space:nowrap}
 </style>
 </head>
 <body>
@@ -186,6 +190,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
       <option value="upside">상승 여력순</option>
       <option value="rsi">RSI 낮은순</option>
       <option value="relvol">오늘 거래량 급증순</option>
+      <option value="ai">AI 관점 점수순</option>
       <option value="regp">본장 급등확률순</option>
       <option value="prep">프리장 급등확률순</option>
       <option value="chg">오늘 등락률순</option>
@@ -301,6 +306,7 @@ function card(it, i){
     </div>
     ${sigs ? `<div class="sigs">${sigs}</div>` : ""}
     <div class="tags">${tags || '<span class="tag">뚜렷한 동기 없음</span>'}</div>
+    ${aiBadge(it)}
     ${probBlock(it)}
     <div class="plan">
       <div><small>참고 진입가</small><b>${usd(it.price)}</b></div>
@@ -308,7 +314,7 @@ function card(it, i){
       <div><small>손절 참고</small><b class="dn">${usd(it.stop)}</b></div>
     </div>
     <div class="detail">
-      ${it.ai ? `<div class="sec"><h3>🤖 AI 종합 판단</h3><div class="ai">${esc(it.ai)}</div></div>` : ""}
+      ${it.ai ? `<div class="sec"><h3>🧠 AI 관점·종합 판단</h3><div class="ai">${esc(it.ai)}</div></div>` : ""}
       ${snapBlock(it)}
       <div class="sec"><h3>차트 진입 조건 ${it.stage}/5</h3><div class="ck">${checks}</div></div>
       <div class="sec"><h3>과거 유사 사례 (같은 단계 · ${DATA.forward}거래일)</h3>
@@ -334,7 +340,11 @@ const head = (c, i, sub) => `<div class="ch"><div class="rank ${i<3?'r'+(i+1):''
   <div class="cs"><b>${c.score}</b><small>${sub}</small></div></div>`;
 function aiOf(t){
   const it = DATA.items.find(x => x.t === t);
-  return it && it.ai ? `<div class="ai" style="margin:0 12px 12px">🤖 ${esc(it.ai)}</div>` : "";
+  return it && it.ai ? aiBadge(it) + `<div class="ai" style="margin:0 12px 12px">${esc(it.ai)}</div>` : "";
+}
+function aiBadge(it){
+  const v = it && it.ai_view;
+  return v ? `<div class="aiv">🧠 <b class="s-${esc(v.stance)}">AI ${esc(v.stance)}${v.score != null ? " " + v.score : ""}</b><span>${esc(v.line)}</span>${v.conf ? `<i>확신 ${esc(v.conf)}</i>` : ""}</div>` : "";
 }
 function surgeCard(c, i){
   const p = c.prob || {}, st = p.reg_st || {}, ps = p.pre_st || {};
@@ -416,6 +426,7 @@ function render(){
     total: it => -it.total, strength: it => -(it.strength*100 + it.total), stage: it => -(it.stage*100 + it.total),
     runway: it => it.runway == null ? 1e9 : it.runway, dday: it => { const d = nearest(it); return d ? d.d : 1e9; },
     upside: it => -upside(it), rsi: it => sn(it).rsi == null ? 1e9 : sn(it).rsi,
+    ai: it => -((it.ai_view && it.ai_view.score) ?? -1),
     regp: it => -((it.prob && it.prob.reg) ?? -1), prep: it => -((it.prob && it.prob.pre) ?? -1),
     relvol: it => -(sn(it).relvol || 0), chg: it => -(sn(it).chg == null ? -1e9 : sn(it).chg)
   }[sort];
