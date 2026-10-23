@@ -65,7 +65,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .fl li span:first-child{font-family:var(--mono);color:var(--muted);flex:0 0 78px}
 .fl a{color:var(--text);text-decoration:none}
 .fl a b{color:var(--violet);font-weight:600;margin-right:4px}
-.ai{background:#1a1830;border:1px solid #3e3566;border-radius:10px;padding:9px 10px;white-space:pre-wrap}
+.ai{background:#1a1830;border:1px solid #3e3566;border-radius:10px;padding:10px 12px;white-space:pre-wrap;line-height:1.65;font-size:13px}
 .note{color:var(--muted);font-size:11px;line-height:1.5}
 .empty{color:var(--muted);text-align:center;padding:40px 0}
 .dday{color:var(--warn);font-family:var(--mono)}
@@ -308,9 +308,8 @@ function card(it, i){
       <div><small>손절 참고</small><b class="dn">${usd(it.stop)}</b></div>
     </div>
     <div class="detail">
-      ${(DATA.reports || []).includes(it.t) ? `<a class="rep" href="r.html?t=${encodeURIComponent(it.t)}">📄 상세 리포트 보기 →</a>` : ""}
-      ${snapBlock(it)}
       ${it.ai ? `<div class="sec"><h3>🤖 AI 종합 판단</h3><div class="ai">${esc(it.ai)}</div></div>` : ""}
+      ${snapBlock(it)}
       <div class="sec"><h3>차트 진입 조건 ${it.stage}/5</h3><div class="ck">${checks}</div></div>
       <div class="sec"><h3>과거 유사 사례 (같은 단계 · ${DATA.forward}거래일)</h3>
         ${s.n ? `<dl class="kv"><dt>사례 수</dt><dd>${s.n.toLocaleString()}건</dd><dt>중앙 고점 배수</dt><dd>${s.median.toFixed(2)}배</dd><dt>+20% 도달</dt><dd>${s.hit20.toFixed(0)}%</dd><dt>+50% 도달</dt><dd>${s.hit50.toFixed(0)}%</dd></dl>` : '<div class="note">사례 부족</div>'}
@@ -333,6 +332,10 @@ const chipsOf = c => `<div class="chipsm">${c.drivers.map(d => `<span>${esc(d)}<
 const head = (c, i, sub) => `<div class="ch"><div class="rank ${i<3?'r'+(i+1):''}">${i+1}</div>
   <div><div class="tk">${esc(c.t)}</div><div class="nm">${esc(c.name)}</div><span class="ty">${esc(c.type)}</span></div>
   <div class="cs"><b>${c.score}</b><small>${sub}</small></div></div>`;
+function aiOf(t){
+  const it = DATA.items.find(x => x.t === t);
+  return it && it.ai ? `<div class="ai" style="margin:0 12px 12px">🤖 ${esc(it.ai)}</div>` : "";
+}
 function surgeCard(c, i){
   const p = c.prob || {}, st = p.reg_st || {}, ps = p.pre_st || {};
   const lift = (v, b) => v != null && b ? (v / b >= 2 ? "up" : v / b < 1 ? "dn" : "") : "";
@@ -345,7 +348,7 @@ function surgeCard(c, i){
     ${chipsOf(c)}
     ${c.si != null && c.si >= 10 ? `<div class="intro" style="margin:0 12px 10px">공매도 유통 대비 <b>${c.si.toFixed(1)}%</b>${c.dtc != null ? ` · 커버 일수 <b>${c.dtc.toFixed(1)}일</b>` : ""}${c.float ? ` · 유통 ${(c.float / 1e6).toFixed(1)}M주` : ""}</div>` : ""}
     ${scn(c.scenario)}${news(c.news)}
-    ${(DATA.reports || []).includes(c.t) ? `<a class="go" href="r.html?t=${encodeURIComponent(c.t)}">📄 상세 리포트 →</a>` : `<a class="go" href="#c-${esc(c.t)}" onclick="openCard('${esc(c.t)}');return false">상세 분석 보기 →</a>`}</article>`;
+    ${aiOf(c.t)}<a class="go" href="#c-${esc(c.t)}" onclick="openCard('${esc(c.t)}');return false">상세 분석 보기 →</a></article>`;
 }
 function jbCard(c, i){
   const j = c.jb, st = j.st || {};
@@ -356,7 +359,7 @@ function jbCard(c, i){
       ${kp("터지면 평균 고가", st.hit_hi != null ? "+" + st.hit_hi.toFixed(0) + "%" : "-", `유사 ${(j.n || 0).toLocaleString()}일`, "up")}
     </div>
     ${chipsOf(c)}${scn(c.scenario)}${news(c.news)}
-    ${(DATA.reports || []).includes(c.t) ? `<a class="go" href="r.html?t=${encodeURIComponent(c.t)}">📄 상세 리포트 →</a>` : `<a class="go" href="#c-${esc(c.t)}" onclick="openCard('${esc(c.t)}');return false">상세 분석 보기 →</a>`}</article>`;
+    ${aiOf(c.t)}<a class="go" href="#c-${esc(c.t)}" onclick="openCard('${esc(c.t)}');return false">상세 분석 보기 →</a></article>`;
 }
 function openCard(t){
   TAB = "all"; $("#q").value = t; syncTabs(); render();

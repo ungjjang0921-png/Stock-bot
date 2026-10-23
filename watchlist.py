@@ -53,7 +53,7 @@ TOP_TELEGRAM = 10
 SURGE_TOP = 8                     # 금일 급등 후보 개수
 JB_TOP = 8                        # 종배 예상 개수
 JB_HIT = 0.10                     # 종배 성공 기준: 다음날 고가 +10% 터치
-AI_TOP = 10
+AI_TOP = 25
 AI_MODEL = "claude-sonnet-5-5"
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
@@ -813,18 +813,22 @@ def translate_ko(text: str) -> str:
     return out
 
 
+_gtr = {"fail": 0}
+
+
 def _translate(text: str) -> str:
-    for attempt in range(2):
+    if _gtr["fail"] < 3:                       # 연속 3번 실패하면 이번 실행은 구글 번역 건너뜀
         try:
-            r = http.post("https://translate.googleapis.com/translate_a/single", timeout=10,
+            r = http.post("https://translate.googleapis.com/translate_a/single", timeout=6,
                           params={"client": "gtx", "sl": "auto", "tl": "ko", "dt": "t"},
                           data={"q": text}, headers=UA_WEB)
             out = "".join(x[0] for x in r.json()[0] if x and x[0])
             if HANGUL.search(out):
+                _gtr["fail"] = 0
                 return out
         except Exception as e:
             log.debug("구글 번역 실패: %s", e)
-        time.sleep(1)
+        _gtr["fail"] += 1
     if ANTHROPIC_KEY or GROQ_KEY:
         out = llm("다음 영어 문장을 자연스러운 한국어로 번역해. 종목명·고유명사는 그대로 두고 번역문만 출력해.\n\n" + text, 400)
         if HANGUL.search(out or ""):
@@ -1168,7 +1172,14 @@ def scorecard() -> dict:
 
 
 # ───────────────── 6. AI 종합판단 (선택) ─────────────────
-_groq = {"model": None, "used": 0}
+_groq = {"model": None, "used": 0, "off": False, "spent": 0.0}
+T0 = time.time()
+RUN_BUDGET = 22 * 60          # 한 번 실행 최대 22분 — 넘으면 남은 작업은 다음 실행으로 (30분 주기 겹침 방지)
+AI_BUDGET = 6 * 60            # AI 호출에 쓰는 최대 시간
+
+
+def time_left() -> float:
+    return RUN_BUDGET - (time.time() - T0)
 
 
 def _groq_model() -> str | None:
@@ -1204,12 +1215,14 @@ def llm(prompt: str, max_tokens: int = 600) -> str:
         except Exception as e:
             log.warning("Claude 실패: %s", e)
             return ""
-    if GROQ_KEY and _groq["used"] < AI_PER_RUN:
+    if GROQ_KEY and not _groq["off"] and _groq["used"] < AI_PER_RUN and _groq["spent"] < AI_BUDGET \
+            and time_left() > 120:
         model = _groq_model()
         if not model:
             return ""
         _groq["used"] += 1
-        for attempt in range(3):
+        t_start = time.time()
+        for attempt in range(2):
             try:
                 r = http.post("https://api.groq.com/openai/v1/chat/completions", timeout=90,
                               headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
@@ -1217,9 +1230,19 @@ def llm(prompt: str, max_tokens: int = 600) -> str:
                                     "messages": [{"role": "system", "content": "너는 미국 소형주 공시 분석가다. 반드시 한국어로만 답한다."},
                                                  {"role": "user", "content": prompt}]})
                 if r.status_code == 429:
-                    time.sleep(min(30, float(r.headers.get("retry-after", 10))))
+                    wait = float(r.headers.get("retry-after", 10) or 10)
+                    if wait > 15 or attempt:                # 한도 소진 → 이번 실행은 AI 끔
+                        log.warning("Groq 한도 도달 — 이번 실행은 AI 생략 (%ss)", wait)
+                        _groq["off"] = True
+                        break
+                    time.sleep(wait)
                     continue
+                if r.status_code >= 400:
+                    log.warning("Groq 오류 %s: %s", r.status_code, r.text[:150])
+                    _groq["off"] = r.status_code in (401, 403)
+                    break
                 txt = r.json()["choices"][0]["message"]["content"].strip()
+                _groq["spent"] += time.time() - t_start
                 time.sleep(2.2)                    # 분당 30회 한도
                 return re.sub(r"<think>.*?</think>", "", txt, flags=re.S).strip()
             except Exception as e:
@@ -1228,20 +1251,63 @@ def llm(prompt: str, max_tokens: int = 600) -> str:
     return ""
 
 
-def ai_summary(item: dict) -> str:
+def ai_summary(item: dict, df=None) -> str:
+    """카드용 AI 종합 판단 — 목적·시나리오·가격대·리스크·확인할 것"""
     if not (ANTHROPIC_KEY or GROQ_KEY):
         return ""
-    facts = {k: item[k] for k in ("t", "name", "price", "strength", "runway", "tags", "ddays", "stage")}
-    facts["filings"] = [f"{f['date']} {f['form']} {f['items']}" for f in item["filings"][:15]]
-    facts["today"] = [x["k"] + ": " + x["t"] for x in item["snap"]["signals"]]
-    prompt = ("다음은 미국 소형주의 SEC 공시·재무·오늘 시세 요약이다. 회사가 주가를 부양해야 할 동기(상장유지, 현금조달, "
-              "물량출회, 병합)와 위험(희석, 출회)을 한국어 3문장 이내로 판단하라. 확실하지 않은 건 '확인 필요'로 표시하고 "
-              "매수 권유는 하지 마라.\n" + json.dumps(facts, ensure_ascii=False))
-    c = cache_load("aisum")
+    c = cache_load("aisum2")
     key = item["t"] + ":" + (item["filings"][0]["date"] if item.get("filings") else "")
-    if key not in c:
-        c[key] = llm(prompt, 400)
-    return c[key]
+    if key in c:
+        return c[key]
+    price = item["price"] or 0
+    sh = item.get("sh") or {}
+    fl = item.get("float")
+    facts = {
+        "티커": item["t"], "회사": item["name"], "현재가": price, "오늘등락%": item.get("chg"),
+        "시총": item.get("mcap"), "발행주식": sh.get("now"), "유통주식": fl, "주식수증가%(5개월+)": sh.get("growth"),
+        "현금": item.get("cash"), "월소진": item.get("burn"), "런웨이개월": item.get("runway"),
+        "자기자본": item.get("equity"),
+        "부양동기태그": [f"{t['name']}({t['level']}) {t.get('note', '')}" for t in item["tags"]],
+        "기한": [f"{d['label']} {d['date']} D-{d['d']}" for d in item.get("ddays", [])],
+        "최근공시": [f"{f['date']} {f['form']} {f.get('items', '')} {f.get('ko', '')}" for f in item["filings"][:15]],
+        "오늘신호": [x["k"] + ": " + x["t"] for x in (item.get("snap") or {}).get("signals", [])],
+        "차트단계": f"{item.get('stage')}/5 {item.get('stage_name')}",
+        "급등확률": {k: (item.get("prob") or {}).get(k) for k in ("reg", "reg_base", "pre", "pre_base", "basis")},
+    }
+    if fl and price:
+        facts["공모유통시총"] = round(fl * price)
+        facts["babyshelf"] = fl * price < 75e6
+        facts["babyshelf탈출가"] = round(75e6 / fl, 4)
+    if sh.get("now") and price and sh["now"] * price < 35e6:
+        facts["MVLS($35M)도달가"] = round(35e6 / sh["now"], 4)
+    if df is not None and len(df) > 30:
+        try:
+            sp = report.spike(df, fl, item["filings"])
+            if sp:
+                facts["거래량폭발"] = {k: sp[k] for k in ("date", "x", "chg", "fade", "turn", "turn7", "filing", "verdict")}
+            facts["20일저가"] = round(float(df["Low"].iloc[-20:].min()), 4)
+            facts["6개월고가"] = round(float(df["High"].iloc[-126:].max()), 4)
+            above = df["High"].iloc[-126:]
+            above = above[above > price * 1.05]
+            if len(above):
+                facts["다음저항"] = round(float(above.min()), 4)
+        except Exception:
+            pass
+    prompt = (
+        "너는 미국 나스닥 소형주(펌핑·희석) 전문 분석가다. 아래 데이터만 근거로 한국어로 분석하라.\n"
+        "형식(각 항목 제목 그대로, 항목마다 1~3문장, 숫자·날짜·가격을 구체적으로):\n"
+        "🎯 핵심 목적: 현금조달/상장유지/물량출회/병합 중 무엇이 주 목적인지와 근거\n"
+        "📈 상승 시나리오: 띄운다면 어디까지(가격·%)와 계기(재료·기한)\n"
+        "📉 하락·설거지 시나리오: 조달·출회가 나오면 어떻게 되는지, 경고 신호\n"
+        "🧱 가격대: 지지·손절 참고가, 저항·목표가\n"
+        "⚠️ 리스크: 희석·런웨이·상폐 위험\n"
+        "🔍 확인할 공시: 다음에 확인해야 할 공시나 이벤트\n"
+        "규칙: 데이터에 없는 사실은 지어내지 말고 '확인 필요'라고 써라. 매수·매도 권유 문장은 쓰지 마라.\n\n"
+        + json.dumps(_clean(facts), ensure_ascii=False, default=str)[:9000])
+    txt = llm(prompt, 900)
+    if txt:
+        c[key] = txt
+    return txt
 
 
 # ───────────────── 6-2. 하루 캐시 (30분 갱신 시 큰 데이터 재다운로드 방지) ─────────────────
@@ -1317,6 +1383,9 @@ def write_reports(items, surge, jbc) -> list[str]:
     out_dir.mkdir(parents=True, exist_ok=True)
     done = []
     for t in pick:
+        if time_left() < 180:
+            log.warning("시간 예산 소진 — 리포트 %d개에서 중단 (나머지는 다음 실행)", len(done))
+            break
         it = by_t[t]
         try:
             rep = report.build(it, PRICES.get(t), FS_ALL.get(t, []), facts_cached(it.get("cik")),
@@ -1517,12 +1586,15 @@ def analyze() -> list[dict]:
     tickers = [u["t"] for u in uni]
     prices = daily_cached(tickers)
     PRICES.update(prices)
+    save_caches()                                   # 중간에 끊겨도 받은 데이터는 남김
     mins = intraday(tickers)
     log.info("일봉 %d · 1분봉 %d", len(prices), len(mins))
     frames = {t: tech_frame(df) for t, df in prices.items()}
     stats = similar_stats(frames)
     target = target_session()
-    reg_m, pre_m, jb_m = build_models(frames, premarket_highs_cached(tickers), target)
+    pre_hi = premarket_highs_cached(tickers)
+    save_caches()
+    reg_m, pre_m, jb_m = build_models(frames, pre_hi, target)
     ciks = cache_get("cik", cik_map)
     items = []
     for u in uni:
@@ -1558,8 +1630,11 @@ def analyze() -> list[dict]:
         except Exception as e:
             log.warning("%s 분석 실패: %s", t, e)
     items.sort(key=lambda x: x["total"], reverse=True)
-    for it in items[:AI_TOP]:
-        it["ai"] = ai_summary(it)
+    ai_pick = items[:AI_TOP]
+    for it in ai_pick:
+        if time_left() < 300:
+            break
+        it["ai"] = ai_summary(it, prices.get(it["t"]))
     surge, jbc = build_candidates(items, prices, frames, jb_m)
     global CALENDAR, FEED, DILUTION
     for name, fn in (("캘린더", lambda: build_calendar(items, surge, jbc)), ("공시", lambda: build_feed(items)),
@@ -1663,11 +1738,9 @@ def main():
     if not items:
         log.error("분석 결과 없음")
         return
-    global REPORTS
-    try:
-        REPORTS = write_reports(items, surge, jbc)
-    except Exception as e:
-        log.exception("리포트 생성 실패: %s", e)
+    import shutil                                   # 상세 리포트 기능 삭제 — 남은 파일 정리
+    shutil.rmtree(OUT.parent / "r", ignore_errors=True)
+    (OUT.parent / "r.html").unlink(missing_ok=True)
     write_page(items, surge, jbc)
     telegram(items, surge, jbc)
 
