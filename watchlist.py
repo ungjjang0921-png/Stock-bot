@@ -1776,6 +1776,16 @@ def main():
             PRED = predmod.run(PRICES, info, target_session(),
                                OUT.parent / "pred_log.json", fx)
             log.info("예측 모델 %.0f초 · 기간 %s", time.time() - t_p, list((PRED or {}).get("horizons", {})))
+            fa = (PRED or {}).get("fail") or {}
+            ready = {h: v for h, v in fa.items() if v.get("ready")}
+            if ready and (ANTHROPIC_KEY or GROQ_KEY):
+                c = cache_load("failai")
+                key = json.dumps(ready, sort_keys=True)[:400]
+                if key not in c:
+                    c[key] = llm("다음은 급등 예측 봇의 '틀린 예측 vs 맞힌 예측' 비교다 (diff>0 이면 틀린 쪽이 더 높음). "
+                                 "틀린 종목들의 공통점과, 다음부터 거를 때 쓸 수 있는 규칙을 한국어 3~5줄로 써라. "
+                                 "숫자를 근거로 쓰고 지어내지 마라.\n" + json.dumps(ready, ensure_ascii=False), 500)
+                PRED["fail_ai"] = c[key]
         except Exception as e:
             log.exception("예측 실패: %s", e)
     for it in items[:AI_TOP]:                       # AI 판단은 예측 다음 (시간 남는 만큼)

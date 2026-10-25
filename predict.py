@@ -166,8 +166,8 @@ def _evaluate(ev, score, H, th, gcol, dcol, pk_med, dd_med, pk_pred=None):
     k, n = int(hit.sum()), int(len(sel))
     lo, hi = _wilson(k, n)
     hits = sel[hit]
-    pk_err = float((hits[gcol] - hits["pk"]).abs().mean() * 100) if len(hits) else None
-    dd_err = float((hits[dcol] - dd_med).abs().mean()) if len(hits) else None
+    pk_err = float((hits[gcol] - hits["pk"]).abs().median() * 100) if len(hits) else None   # 극단값 영향 줄이려 중앙값
+    dd_err = float((hits[dcol] - dd_med).abs().median()) if len(hits) else None
     return {"rate": round(k / n * 100, 1), "k": k, "n": n, "lo": lo, "hi": hi,
             "pk_err": None if pk_err is None else round(pk_err, 1), "dd_err": None if dd_err is None else round(dd_err, 1),
             "nh": int(len(hits))}
@@ -215,6 +215,13 @@ def run(prices: dict[str, pd.DataFrame], info: dict[str, dict], cutoff: date, lo
         rw_ = 1 + 2 * tr["rsi20"].values
         w2, b2 = _logit_fit(Xn_tr, ytr, weights=rw_)
         models["RSI20 가중"] = (Xn_ev @ w2 + b2, Xn_now @ w2 + b2)
+        # 오답 반영: 학습 데이터에서 자신 있게 골랐는데 틀린 날(오답)을 3배 무게로 다시 학습
+        s_tr = Xn_tr @ w + b
+        cut = np.quantile(s_tr, 0.97)
+        hard = (s_tr >= cut) & (ytr == 0)
+        if hard.sum() >= 100:
+            w3, b3 = _logit_fit(Xn_tr, ytr, weights=np.where(hard, 3.0, 1.0))
+            models["오답 반영"] = (Xn_ev @ w3 + b3, Xn_now @ w3 + b3)
         gb = _gbm(Xn_tr, ytr)                                   # 비선형 모델 (설치돼 있으면)
         if gb is not None:
             models["부스팅"] = (gb.predict_proba(Xn_ev)[:, 1], gb.predict_proba(Xn_now)[:, 1])
@@ -288,6 +295,11 @@ def run(prices: dict[str, pd.DataFrame], info: dict[str, dict], cutoff: date, lo
             "imp": [{"f": FEAT_KO[f], "w": round(float(v), 2)} for f, v in imp],
             "train_n": int(len(tr)), "train_pos": int(ytr.sum()), "eval_from": ev_start.isoformat()}
     out["ledger"] = ledger(out, prices, log_path)
+    try:
+        out["fail"] = failure_analysis(log_path, A)
+    except Exception as e:
+        log.warning("실패 분석 오류: %s", e)
+        out["fail"] = {}
     return out
 
 
@@ -297,6 +309,45 @@ def _add_bd(d: date, n: int) -> date:
         if d.weekday() < 5:
             n -= 1
     return d
+
+
+FAIL_FEATS = ["relvol", "ret1", "ret20", "rsi", "dvol", "dlow", "dhigh", "range20", "cp", "updown", "pump", "logp"]
+FAIL_MIN = 8             # 적중·미적중 각각 이만큼 쌓여야 분석
+
+
+def failure_analysis(path: Path, A: pd.DataFrame) -> dict:
+    """고정 예측 중 미적중 vs 적중 — 기준일 특징을 비교해 '틀린 종목의 공통점'을 찾음"""
+    book = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+    out = {}
+    for H in HORIZONS:
+        done = [e for e in book if e["h"] == H and e["res"] in ("적중", "미적중")]
+        rows = []
+        for e in done:
+            k = (date.fromisoformat(e["asof"]), e["t"])
+            if k in A.index:
+                r = A.loc[k, FAIL_FEATS]
+                if isinstance(r, pd.DataFrame):
+                    r = r.iloc[0]
+                rows.append({**r.to_dict(), "hit": e["res"] == "적중",
+                             "gain": (e["act_peak"] / e["ref"] - 1) * 100 if e.get("act_peak") else None})
+        if not rows:
+            continue
+        D = pd.DataFrame(rows)
+        hit, miss = D[D["hit"]], D[~D["hit"]]
+        res = {"n_hit": int(len(hit)), "n_miss": int(len(miss)), "ready": len(hit) >= FAIL_MIN and len(miss) >= FAIL_MIN}
+        g = miss["gain"].dropna()
+        if len(g):
+            th = HORIZONS[H] * 100
+            res["near"] = round(float((g >= th * 0.6).mean()) * 100)        # 목표의 60% 이상은 갔던 아까운 실패
+            res["miss_med"] = round(float(g.median()), 1)
+        if res["ready"]:
+            sd = A[FAIL_FEATS].std().replace(0, 1)
+            diff = ((miss[FAIL_FEATS].median() - hit[FAIL_FEATS].median()) / sd).sort_values(key=abs, ascending=False)
+            res["diff"] = [{"f": FEAT_KO.get(f, f), "d": round(float(v), 2),
+                            "miss": round(float(miss[f].median()), 3), "hit": round(float(hit[f].median()), 3)}
+                           for f, v in diff.head(5).items() if abs(v) >= 0.15]
+        out[str(H)] = res
+    return out
 
 
 def ledger(out: dict, prices: dict, path: Path) -> list[dict]:
