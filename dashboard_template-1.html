@@ -133,6 +133,18 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .scn{padding:0 12px 10px}
 .scn div{display:grid;grid-template-columns:46px 1fr;gap:8px;padding:6px 0;border-top:1px dashed var(--line);font-size:12.5px;line-height:1.5}
 .scn b{font-size:11.5px;border-radius:6px;padding:2px 0;text-align:center;height:fit-content}
+.tp{margin:0 12px 12px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:12.5px}
+.tp h4{margin:0 0 8px;font-size:13px}
+.tp .g{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}
+.tp .g div{background:rgba(127,127,127,.08);border-radius:8px;padding:6px 8px}
+.tp .g small{display:block;opacity:.7;font-size:11px}
+.tp .g b{font-size:13.5px}
+.tp .g em{display:block;font-style:normal;font-size:10.5px;opacity:.65}
+.tp .vd{padding:6px 8px;border-radius:8px;font-weight:600}
+.tp .vd.good{background:rgba(34,197,94,.14);color:#22c55e}
+.tp .vd.mid{background:rgba(245,158,11,.14);color:#f59e0b}
+.tp .vd.bad{background:rgba(239,68,68,.14);color:#ef4444}
+.tp .ft{opacity:.65;font-size:11px;margin-top:6px}
 .s-근거,.s-매수,.s-익일{background:#1d2a3d;color:var(--accent)}.s-강세{background:#10301f;color:#6be3a4}
 .s-기본{background:#22262e;color:#c9d3df}.s-약세{background:#3a1519;color:#ff8f8f}.s-리스크{background:#3a2a10;color:#ffc062}
 .nws{padding:0 12px 12px;font-size:12px}
@@ -323,6 +335,7 @@ function card(it, i){
     <div class="tags">${tags || '<span class="tag">뚜렷한 동기 없음</span>'}</div>
     ${aiBadge(it)}
     ${probBlock(it)}
+    ${tradeBlock(it)}
     <div class="plan">
       <div><small>참고 진입가</small><b>${usd(it.price)}</b></div>
       <div><small>유사군 예상 고점</small><b class="up">${it.target ? usd(it.target) : "-"}</b>${up>0?`<small>+${up.toFixed(0)}% · ${s.median.toFixed(2)}배</small>`:""}</div>
@@ -357,6 +370,23 @@ function aiOf(t){
   const it = DATA.items.find(x => x.t === t);
   return it && it.ai ? aiBadge(it) + `<div class="ai" style="margin:0 12px 12px">${esc(it.ai)}</div>` : "";
 }
+function tradeBlock(it){
+  const t = it && it.trade; if (!t) return "";
+  const pc = v => (v / it.price - 1) * 100;
+  const sp = v => `${pc(v) >= 0 ? "+" : ""}${pc(v).toFixed(1)}%`;
+  return `<div class="tp"><h4>📐 매매 시나리오 · 얼마에 들어갈까</h4>
+    <div class="g">
+      <div><small>① 1차 눌림 매수</small><b>${usd(t.e1)}</b><em>${esc(t.e1k)} · ${sp(t.e1)}</em></div>
+      <div><small>② 2차 분할 매수</small><b>${usd(t.e2)}</b><em>${esc(t.e2k)} · ${sp(t.e2)}</em></div>
+      <div><small>🚀 돌파 매수</small><b>${t.brk ? usd(t.brk) : "-"}</b><em>${t.brk ? usd(t.brk_lv) + " 뚫고 거래량 붙을 때" : "위 매물대 없음"}</em></div>
+      <div><small>🛑 손절</small><b class="dn">${usd(t.stop)}</b><em>평단 대비 -${((1 - t.stop / t.avg) * 100).toFixed(0)}%</em></div>
+      <div><small>🎯 1차 목표 (절반 익절)</small><b class="up">${usd(t.t1)}</b><em>평단 대비 +${((t.t1 / t.avg - 1) * 100).toFixed(0)}%</em></div>
+      <div><small>🎯 2차 목표</small><b class="up">${usd(t.t2)}</b><em>평단 대비 +${((t.t2 / t.avg - 1) * 100).toFixed(0)}%</em></div>
+    </div>
+    <div class="vd ${esc(t.lv)}">${esc(t.verdict)}${t.rr != null ? ` · 손익비 ${t.rr}` : ""}</div>
+    <div class="ft">현재가 ${usd(it.price)} 기준 · 하루 변동폭 ${t.atr}% · ①②를 반씩 나눠 받는 기준이며, 1차 목표에서 절반 팔고 나머지는 손절선을 본전으로 올리기. 참고용입니다.</div>
+  </div>`;
+}
 function aiBadge(it){
   const v = it && it.ai_view;
   return v ? `<div class="aiv">🧠 <b class="s-${esc(v.stance)}">AI ${esc(v.stance)}${v.score != null ? " " + v.score : ""}</b><span>${esc(v.line)}</span>${v.conf ? `<i>확신 ${esc(v.conf)}</i>` : ""}</div>` : "";
@@ -372,7 +402,7 @@ function surgeCard(c, i){
     </div>
     ${chipsOf(c)}
     ${c.si != null && c.si >= 10 ? `<div class="intro" style="margin:0 12px 10px">공매도 유통 대비 <b>${c.si.toFixed(1)}%</b>${c.dtc != null ? ` · 커버 일수 <b>${c.dtc.toFixed(1)}일</b>` : ""}${c.float ? ` · 유통 ${(c.float / 1e6).toFixed(1)}M주` : ""}</div>` : ""}
-    ${scn(c.scenario)}${news(c.news)}
+    ${scn(c.scenario)}${tradeBlock(DATA.items.find(x => x.t === c.t))}${news(c.news)}
     ${aiOf(c.t)}<a class="go" href="#c-${esc(c.t)}" onclick="openCard('${esc(c.t)}');return false">상세 분석 보기 →</a></article>`;
 }
 function jbCard(c, i){

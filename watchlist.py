@@ -1006,6 +1006,71 @@ def jb_scenario(it, j, d, r, df) -> list[dict]:
     return lines
 
 
+def trade_plan(it: dict, df: pd.DataFrame | None) -> dict | None:
+    """워치 카드용 매매 시나리오: 눌림 진입가 · 돌파 진입가 · 손절 · 목표가 · 손익비 · 판단"""
+    sn = it.get("snap") or {}
+    p = it.get("price") or sn.get("price")
+    if df is None or len(df) < 25 or not p:
+        return None
+    c, h, l = df["Close"], df["High"], df["Low"]
+    prev_c = float(c.iloc[-2]) if sn.get("sdate") and str(df.index[-1].date()) == sn["sdate"] else float(c.iloc[-1])
+    tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
+    atr = float(tr.iloc[-14:].mean()) / p
+    # 지지선 후보 (현재가 아래)
+    sup = {"VWAP": sn.get("vwap"), "전일 종가": prev_c, "20일선": float(c.iloc[-20:].mean()),
+           "5일 저점": float(l.iloc[-5:].min()), "20일 저점": float(l.iloc[-20:].min()),
+           "당일 저가": sn.get("day_lo")}
+    lv = sorted({(round(v, 6), k) for k, v in sup.items() if v and p * 0.70 <= v <= p * 0.995}, reverse=True)
+    merged = []                       # 3% 안쪽으로 붙은 지지선은 하나로
+    for v, k in lv:
+        if merged and v >= merged[-1][0] * 0.97:
+            merged[-1] = (merged[-1][0], merged[-1][1] + "·" + k)
+        else:
+            merged.append((v, k))
+    # 저항선 (현재가 위): 당일 고가, 20일 고가, 6개월 매물대
+    res = sorted({round(float(x), 6) for x in [sn.get("day_hi"), float(h.iloc[-20:].max())] if x and x > p * 1.01}
+                 | set(resistances(df, p)))
+    brk = res[0] if res else None
+    if merged:
+        e1, e1k = min(merged[0][0] * 1.01, p * 0.995), merged[0][1]
+    else:
+        e1, e1k = p * (1 - max(0.03, atr * 0.5)), "변동폭 절반 눌림"
+    e2, e2k = (merged[1][0] * 1.01, merged[1][1]) if len(merged) > 1 else (e1 * (1 - max(0.05, atr)), "추가 눌림")
+    floor = merged[1][0] if len(merged) > 1 else (merged[0][0] if merged else e2)
+    stop = min(floor * 0.97, e2 * 0.97)
+    stop = max(min(stop, e1 * 0.93), e1 * 0.80)    # 손절폭 7~20%
+    avg = (e1 + e2) / 2
+    tg = [x for x in sorted(set(res) | ({it["target"]} if it.get("target") else set())) if x > avg * 1.08]
+    t1 = tg[0] if tg else avg * (1 + max(0.15, atr * 2))
+    t2 = next((x for x in tg if x > t1 * 1.10), t1 * 1.25)
+    rr = (t1 - avg) / (avg - stop) if avg > stop else None
+    # 판단
+    names = {t["name"]: t["level"] for t in it.get("tags", [])}
+    ex = it.get("ex") or {}
+    chg = it.get("chg") or 0
+    vw = sn.get("vwap")
+    warn = []
+    if "공모 준비" in names or "ATM·공모" in names or ex.get("dilute_news"):
+        warn.append("증자·ATM 물량 위험")
+    if "물량 출회" in names:
+        warn.append("물량 출회 중")
+    if chg >= 40 or (vw and p > vw * 1.25):
+        warn.append("이미 급등 — 추격 금지")
+    if chg <= -40:
+        warn.append("폭락 직후 — 바닥 확인 전")
+    if warn:
+        verdict, lv_ = "⚠ 관망 · " + " · ".join(warn), "bad"
+    elif rr is not None and rr < 1.5:
+        verdict, lv_ = f"손익비 {rr:.1f} 낮음 — 눌림 ② 가격까지 기다리기", "mid"
+    elif it.get("stage", 0) >= 4:
+        verdict, lv_ = "눌림 분할 매수 유효 (차트 지지 확인)", "good"
+    else:
+        verdict, lv_ = "돌파 확인 후 진입이 안전 (차트 약함)", "mid"
+    return {"e1": e1, "e1k": e1k, "e2": e2, "e2k": e2k, "brk": brk * 1.01 if brk else None, "brk_lv": brk,
+            "stop": stop, "t1": t1, "t2": t2, "rr": round(rr, 1) if rr else None, "avg": avg,
+            "atr": round(atr * 100, 1), "verdict": verdict, "lv": lv_}
+
+
 def build_candidates(items, prices, frames, jb):
     by_t = {it["t"]: it for it in items}
     # 1차 점수 (외부 조회 없이) → 상위만 뉴스·공매도 조회
@@ -1655,6 +1720,11 @@ def analyze() -> list[dict]:
             log.warning("%s 분석 실패: %s", t, e)
     items.sort(key=lambda x: x["total"], reverse=True)
     surge, jbc = build_candidates(items, prices, frames, jb_m)
+    for it in items:
+        try:
+            it["trade"] = trade_plan(it, prices.get(it["t"]))
+        except Exception as e:
+            log.warning("%s 매매 시나리오 실패: %s", it["t"], e)
     global CALENDAR, FEED, DILUTION
     for name, fn in (("캘린더", lambda: build_calendar(items, surge, jbc)), ("공시", lambda: build_feed(items)),
                      ("희석", lambda: build_dilution(items))):
