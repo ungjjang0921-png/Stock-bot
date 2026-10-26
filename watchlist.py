@@ -305,6 +305,10 @@ def financials(cik: int) -> dict:
             break
     burn = monthly_burn(concept(cik, "NetCashProvidedByUsedInOperatingActivities"))
     eq = latest_value(concept(cik, "StockholdersEquity"))
+    liab = latest_value(concept(cik, "Liabilities"))
+    if not liab:
+        ld = latest_value(concept(cik, "LongTermDebtNoncurrent")) or latest_value(concept(cik, "LongTermDebt"))
+        liab = ld
     runway = None
     if cash and burn is not None:
         runway = 99.0 if burn <= 0 else cash[0] / burn
@@ -313,7 +317,55 @@ def financials(cik: int) -> dict:
     except Exception:
         sh = None
     return {"sh": sh, "cash": cash[0] if cash else None, "cash_date": cash[1] if cash else None,
-            "burn": burn, "runway": runway, "equity": eq[0] if eq else None}
+            "burn": burn, "runway": runway, "equity": eq[0] if eq else None,
+            "liab": liab[0] if liab else None}
+
+
+# ── 부도·파산 위험 (펌핑 동기와 반대: 주식이 휴지가 될 수 있는 종목) ──
+DISTRESS_WORDS = ("chapter 11", "chapter 7", "bankruptcy", "bankrupt", "grace period", "missed interest",
+                  "missed its interest", "not to make the interest", "skip interest", "interest payment",
+                  "forbearance", "restructuring support agreement", "debt restructuring", "recapitalization",
+                  "going concern", "default", "creditors", "noteholders", "receivership", "insolvency",
+                  "wind down", "liquidation")
+
+
+def distress_flags(fs: list, fin: dict, mcap: float | None, today: date) -> list[str]:
+    out = []
+    for f in fs:
+        if f["form"].startswith("8-K") and days_ago(f["date"], today) <= 180:
+            its = f.get("items") or ""
+            if "1.03" in its:
+                out.append("파산 신청 공시")
+            if "2.04" in its:
+                out.append("채무불이행·조기상환 사유 공시")
+    liab = fin.get("liab")
+    if liab and mcap and mcap > 0:
+        r = liab / mcap
+        if r >= 10:
+            out.append(f"부채가 시총의 {r:.0f}배")
+    eq = fin.get("equity")
+    if eq is not None and eq < 0 and liab and mcap and liab > mcap * 3:
+        out.append("자본잠식")
+    return list(dict.fromkeys(out))
+
+
+def distress_news(t: str) -> list[str]:
+    """최근 뉴스 제목·요약에 이자 미지급·파산·채무조정 단어가 있나 (예측 상위 후보만 조회)"""
+    c = cache_load("distress")
+    if t in c:
+        return c[t]
+    hits = []
+    try:
+        for n in fetch_news(t, hours=24 * 60):
+            txt = n["title"].lower()
+            w = next((w for w in DISTRESS_WORDS if w in txt), None)
+            if w:
+                hits.append(f"뉴스: {n['title'][:60]}")
+                break
+    except Exception:
+        pass
+    c[t] = hits
+    return hits
 
 
 # ───────────────── 3. 동기 태그 & 강도 ─────────────────
@@ -879,7 +931,7 @@ def pct(a, b):
     return f"{(a / b - 1) * 100:+.0f}%" if a and b else ""
 
 
-RISK_TAGS = {"공모 준비": 8, "ATM·공모": 8, "물량 출회": 8, "병합": 4, "공시 지연": 5}
+RISK_TAGS = {"부도 위험": 25, "공모 준비": 8, "ATM·공모": 8, "물량 출회": 8, "병합": 4, "공시 지연": 5}
 
 
 def drivers_for(it: dict, ex: dict, today_side: bool) -> tuple[list, list]:
@@ -1052,6 +1104,8 @@ def trade_plan(it: dict, df: pd.DataFrame | None) -> dict | None:
     warn = []
     if "공모 준비" in names or "ATM·공모" in names or ex.get("dilute_news"):
         warn.append("증자·ATM 물량 위험")
+    if "부도 위험" in names:
+        warn.insert(0, "부도·파산 위험 — 주식 휴지 될 수 있음")
     if "물량 출회" in names:
         warn.append("물량 출회 중")
     if chg >= 40 or (vw and p > vw * 1.25):
@@ -1551,7 +1605,7 @@ def premarket_highs_cached(tickers):
 def sec_cached(cik):
     if not cik:
         return [], {}
-    c = cache_load("sec2")
+    c = cache_load("sec3")
     if cik not in c:
         c[cik] = (filings(cik), financials(cik))
     return c[cik]
@@ -1696,11 +1750,16 @@ def analyze() -> list[dict]:
             fs, fin = sec_cached(cik)
             FS_ALL[t] = fs
             tags, ddays, raw = motive_tags(price, u["float"], fs, fin, df, today)
+            dist = distress_flags(fs, fin, u["mcap"], today)
+            if dist:
+                tags.insert(0, {"name": "부도 위험", "level": "위험", "note": " · ".join(dist)})
             stg = int(frames[t]["stage"].iloc[-1]) if t in frames else 0
             st = stats.get(stg, {})
             mult = st.get("median")
             stop = float(df["Low"].iloc[-5:].min() * 0.97) if df is not None else None
             total = round(0.45 * strength(raw) * 20 + 0.35 * stg * 20 + 0.20 * st.get("hit20", 0), 1)
+            if dist:                      # 부도 위험은 순위 맨 아래로
+                total = round(total - 60, 1)
             items.append({
                 "t": t, "name": u["name"], "price": price, "chg": snap["chg"], "mcap": u["mcap"],
                 "float": u["float"], "cik": cik, "watch": bool(u.get("watch")),
@@ -1740,6 +1799,369 @@ def analyze() -> list[dict]:
             log.warning("%s 실패: %s", name, e)
     save_caches()
     return items, surge, jbc
+
+
+# ───────────────── 7-1. 심층 분석 (진입 판단·희석 물량·현금 조달·이벤트·보유자) ─────────────────
+DEEP_TOP = 15                 # 이번 실행에서 심층 분석할 종목 수 (구조·보유자)
+DEEP_LLM_NEW = 5              # 이번 실행에서 새로 AI가 공시를 읽을 종목 수 (나머지는 저장된 결과 재사용)
+DEEP_BUDGET = 5 * 60
+_PC: dict = {}
+
+
+def pcache(name: str) -> dict:
+    """날짜와 무관하게 계속 쓰는 캐시 (공시는 한 번 나오면 안 바뀜)"""
+    if name not in _PC:
+        try:
+            _PC[name] = json.loads((CACHE / f"p_{name}.json").read_text(encoding="utf-8"))
+        except Exception:
+            _PC[name] = {}
+    return _PC[name]
+
+
+def pcache_save():
+    CACHE.mkdir(exist_ok=True)
+    for name, data in _PC.items():
+        try:
+            (CACHE / f"p_{name}.json").write_text(json.dumps(data, ensure_ascii=False, default=str), encoding="utf-8")
+        except Exception as e:
+            log.warning("영구 캐시 저장 실패 %s: %s", name, e)
+
+
+def sec_text(url: str, limit: int = 2_000_000) -> str:
+    global _last_sec
+    wait = 0.12 - (time.time() - _last_sec)
+    if wait > 0:
+        time.sleep(wait)
+    _last_sec = time.time()
+    try:
+        r = http.get(url, headers=SEC_UA, timeout=30)
+        return r.text[:limit] if r.status_code == 200 else ""
+    except Exception as e:
+        log.warning("SEC 원문 실패: %s", e)
+        return ""
+
+
+def html_to_text(h: str) -> str:
+    h = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", h)
+    h = re.sub(r"(?i)<br\s*/?>|</p>|</div>|</tr>", "\n", h)
+    h = re.sub(r"<[^>]+>", " ", h)
+    h = (h.replace("&nbsp;", " ").replace("&#160;", " ").replace("&amp;", "&").replace("&#8217;", "'")
+         .replace("&#8220;", '"').replace("&#8221;", '"'))
+    return re.sub(r"[ \t\r\f\v]+", " ", h)
+
+
+DIL_WORDS = ("warrant", "convertible", "preferred", "pre-funded", "purchase agreement", "equity line",
+             "at-the-market", "at the market", "sales agreement", "elco", "eloc", "conversion price",
+             "exercise price", "registered direct", "private placement", "pipe", "promissory note")
+
+
+def pick_paras(text: str, cap: int) -> str:
+    out, n = [], 0
+    for p in re.split(r"\n\s*\n|\n", text):
+        p = p.strip()
+        if 60 < len(p) < 2500 and any(w in p.lower() for w in DIL_WORDS):
+            out.append(p)
+            n += len(p)
+            if n > cap:
+                break
+    return "\n".join(out)[:cap]
+
+
+def _acc(url: str) -> str:
+    m = re.search(r"/data/\d+/(\d{18})/", url)
+    return m.group(1) if m else url
+
+
+def owner_info(f: dict, issuer: str) -> dict | None:
+    """Form 4·144·13D/G 하나 → {이름, 역할, 매수·매도, 지분} (접수번호별 영구 캐시)"""
+    c = pcache("owners")
+    acc = _acc(f["url"])
+    if acc in c:
+        return c[acc]
+    cik = re.search(r"/data/(\d+)/", f["url"]).group(1)
+    dashed = f"{acc[:10]}-{acc[10:12]}-{acc[12:]}"
+    hdr = html_to_text(sec_text(f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc}/{dashed}-index-headers.html", 60000))
+    names, sec_ = [], ""
+    for m in re.finditer(r"(SUBJECT COMPANY|ISSUER|REPORTING-OWNER|FILED BY|FILER):|COMPANY CONFORMED NAME:\s*([^\n]+)", hdr):
+        if m.group(1):
+            sec_ = m.group(1)
+        elif sec_ in ("REPORTING-OWNER", "FILED BY"):
+            names.append(re.split(r"\s{2,}", m.group(2).strip())[0])
+    iss = (issuer or "").lower()[:10]
+    names = [n for n in dict.fromkeys(names) if n and not (iss and n.lower().startswith(iss))]
+    res = {"form": f["form"], "date": f["date"], "name": names[0] if names else "", "url": f["url"]}
+    if f["form"] in ("4", "4/A"):
+        raw = sec_text(re.sub(r"/xslF345X\d+/", "/", f["url"]), 400000)
+        res["name"] = (re.search(r"<rptOwnerName>\s*([^<]+)", raw) or [None, res["name"]])[1].strip()
+        role = []
+        if re.search(r"<isDirector>\s*(1|true)", raw):
+            role.append("이사")
+        if re.search(r"<isOfficer>\s*(1|true)", raw):
+            role.append((re.search(r"<officerTitle>\s*([^<]+)", raw) or [None, "임원"])[1].strip()[:20])
+        if re.search(r"<isTenPercentOwner>\s*(1|true)", raw):
+            role.append("10% 대주주")
+        res["role"] = " · ".join(role)
+        buy = sell = 0.0
+        px = []
+        for tx in re.findall(r"<nonDerivativeTransaction>(.*?)</nonDerivativeTransaction>", raw, re.S):
+            code = (re.search(r"<transactionCode>\s*(\w)", tx) or [None, ""])[1]
+            sh = re.search(r"<transactionShares>\s*<value>\s*([\d.]+)", tx)
+            pr = re.search(r"<transactionPricePerShare>\s*<value>\s*([\d.]+)", tx)
+            if not sh:
+                continue
+            if code == "P":
+                buy += float(sh.group(1))
+            elif code == "S":
+                sell += float(sh.group(1))
+            if pr and code in "PS":
+                px.append(float(pr.group(1)))
+        after = re.findall(r"<sharesOwnedFollowingTransaction>\s*<value>\s*([\d.]+)", raw)
+        res.update({"buy": buy, "sell": sell, "px": round(sum(px) / len(px), 4) if px else None,
+                    "own": float(after[-1]) if after else None})
+    elif "13" in f["form"]:
+        raw = sec_text(f["url"], 400000)
+        m = re.search(r"<percentOfClass>\s*([\d.]+)", raw) or \
+            re.search(r"(?is)percent\s+of\s+class.{0,400}?([\d.]+)\s*%", html_to_text(raw))
+        res["pct"] = float(m.group(1)) if m else None
+        res["role"] = "대주주(경영 참여 목적)" if "13D" in f["form"] else "5% 이상 보유"
+    elif f["form"].startswith("144"):
+        raw = sec_text(f["url"], 200000)
+        m = re.search(r"<noOfUnitsSold>\s*([\d.]+)", raw)
+        res["sell_plan"] = float(m.group(1)) if m else None
+        res["role"] = "매도 예정 신고(144)"
+    c[acc] = res
+    return res
+
+
+OWNER_FORMS = ("4", "4/A", "144", "SC 13D", "SC 13D/A", "SC 13G", "SC 13G/A",
+               "SCHEDULE 13D", "SCHEDULE 13D/A", "SCHEDULE 13G", "SCHEDULE 13G/A")
+
+
+def holders(fs: list, issuer: str, today: date) -> list[dict]:
+    recent = [f for f in fs if f["form"] in OWNER_FORMS and days_ago(f["date"], today) <= 365][:14]
+    by = {}
+    for f in recent:
+        try:
+            o = owner_info(f, issuer)
+        except Exception as e:
+            log.warning("보유자 공시 실패: %s", e)
+            continue
+        if not o or not o.get("name"):
+            continue
+        k = o["name"].upper()
+        h = by.setdefault(k, {"name": o["name"], "role": "", "pct": None, "buy": 0.0, "sell": 0.0, "plan": 0.0,
+                              "own": None, "last": o["date"], "forms": [], "url": o["url"]})
+        h["role"] = h["role"] or o.get("role", "")
+        if o.get("pct") is not None and h["pct"] is None:
+            h["pct"] = o["pct"]
+        if o.get("own") is not None and h["own"] is None:
+            h["own"] = o["own"]
+        h["buy"] += o.get("buy") or 0
+        h["sell"] += o.get("sell") or 0
+        h["plan"] += o.get("sell_plan") or 0
+        h["forms"].append(f"{o['form']} {o['date'][5:]}")
+    out = []
+    for h in by.values():
+        if h["sell"] > h["buy"] or h["plan"]:
+            h["act"] = "매도 중"
+        elif h["buy"] > 0:
+            h["act"] = "매수"
+        else:
+            h["act"] = "보유"
+        h["forms"] = h["forms"][:3]
+        out.append(h)
+    out.sort(key=lambda h: (-(h["pct"] or 0), -(h["sell"] + h["buy"])))
+    return out[:8]
+
+
+DEEP_PROMPT = """다음은 미국 소형주 {t} ({name})의 최근 SEC 공시 발췌다. 주가를 누를 수 있는 희석 물량(워런트·전환우선주·전환사채·사전납입워런트(PFW)·ELOC·ATM 등)과 회사 상황을 뽑아라.
+반드시 아래 JSON 하나만 출력하라. 공시에 없는 값은 null, 지어내지 마라. 수량은 주식 수(숫자), 가격은 달러(숫자).
+{{"biz":"사업과 최근 변화(피벗·인수·매출 유무) 한국어 1~2문장",
+ "inst":[{{"kind":"워런트|전환우선주|전환사채|PFW|ELOC|기타","holder":"보유자/계약 상대(모르면 빈칸)","qty":숫자 또는 null,"price":숫자 또는 null,"locked":true/false(락업·주총승인 전·미등록이라 당장 못 팔면 true),"note":"만기·조정 조항 등 한국어 짧게"}}],
+ "eloc":{{"active":true/false,"size":"총 한도 예: $50M","terms":"가격 산정 방식 한국어 짧게"}},
+ "atm":{{"active":true/false,"size":"예: $10M","agent":"주관사"}},
+ "cash_note":"현금 조달 계획·필요성 한국어 1문장"}}
+
+공시 발췌:
+{text}"""
+
+
+def deep_ai(t: str, name: str, fs: list) -> dict | None:
+    """최근 10-Q/10-K + 계약·발행 8-K·424B 를 AI가 읽고 희석 물량 표를 만든다 (공시가 바뀔 때만 다시 읽음)"""
+    base = next((f for f in fs if f["form"] in ("10-Q", "10-K", "10-Q/A", "10-K/A", "20-F")), None)
+    extra = [f for f in fs if (f["form"].startswith("8-K") and any(x in f.get("items", "") for x in ("1.01", "3.02")))
+             or f["form"] in ("424B5", "424B4", "424B3", "S-1", "S-1/A")][:3]
+    if not base and not extra:
+        return None
+    key = "|".join(_acc(f["url"]) for f in ([base] if base else []) + extra)
+    c = pcache("deep_ai")
+    if t in c and c[t].get("key") == key:
+        return c[t]["data"]
+    if _deep["new"] >= DEEP_LLM_NEW or not (ANTHROPIC_KEY or GROQ_KEY):
+        return c.get(t, {}).get("data")                # 지난 공시 기준 결과라도
+    _deep["new"] += 1
+    parts = []
+    if base:
+        parts.append(f"[{base['form']} {base['date']}]\n" + pick_paras(html_to_text(sec_text(base["url"])), 7000))
+    for f in extra:
+        parts.append(f"[{f['form']} {f['date']}]\n" + pick_paras(html_to_text(sec_text(f["url"])), 2200))
+    text = "\n\n".join(p for p in parts if p.strip())[:13000]
+    if len(text) < 200:
+        return None
+    raw = llm(DEEP_PROMPT.format(t=t, name=name, text=text), 1200)
+    m = re.search(r"\{.*\}", raw or "", re.S)
+    if not m:
+        return c.get(t, {}).get("data")
+    try:
+        data = json.loads(m.group(0))
+    except Exception:
+        try:
+            data = json.loads(re.sub(r",\s*([}\]])", r"\1", m.group(0)))
+        except Exception:
+            return c.get(t, {}).get("data")
+    c[t] = {"key": key, "data": data, "date": datetime.now(KST).date().isoformat()}
+    return data
+
+
+_deep = {"new": 0}
+
+
+def _num(v):
+    if v in (None, "", "null"):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    m = re.search(r"([\d.]+)\s*([kmb]|million|thousand|billion)?", str(v).replace(",", "").replace("$", "").lower())
+    if not m:
+        return None
+    try:
+        x = float(m.group(1))
+    except ValueError:
+        return None
+    mul = {"k": 1e3, "thousand": 1e3, "m": 1e6, "million": 1e6, "b": 1e9, "billion": 1e9}.get(m.group(2) or "", 1)
+    return x * mul
+
+
+def deep_analysis(it: dict, df: pd.DataFrame | None, fs: list, fin: dict, today: date) -> dict:
+    p = it["price"] or 0
+    fl = it.get("float")
+    sh = ((fin.get("sh") or {}).get("now")) or it.get("sh_now")
+    out = {"asof": today.isoformat()}
+    # ── 베이비 셸프: 비계열 유통 × 60일 최고가 < $75M 이면 1년에 유통 시총의 1/3까지만 증자 가능
+    if fl and df is not None and len(df):
+        hi60 = float(df["Close"].iloc[-60:].max())
+        pf = fl * hi60
+        out["baby"] = {"active": pf < 75e6, "pf": pf, "cap": pf / 3, "escape": 75e6 / fl if pf < 75e6 else None}
+    # ── 현금 조달
+    cash, burn, rw = fin.get("cash"), fin.get("burn"), fin.get("runway")
+    dep = None
+    if cash and burn and burn > 0 and fin.get("cash_date"):
+        dep = (date.fromisoformat(fin["cash_date"]) + timedelta(days=int(cash / burn * 30.4))).isoformat()
+    s3 = next((f for f in fs if f["form"] in ("S-3", "F-3")), None)
+    eff = next((f for f in fs if f["form"] == "EFFECT"), None)
+    atm = next((f for f in fs if f["form"] == "424B5" and days_ago(f["date"], today) <= 365), None)
+    out["cash"] = {"cash": cash, "burn": burn, "runway": rw, "deplete": dep,
+                   "shelf": (f"{s3['form']} {s3['date']}" + (" · 효력 발생" if eff and eff["date"] >= s3["date"] else " · 효력 대기"))
+                   if s3 else None, "atm424": atm["date"] if atm else None}
+    # ── AI 공시 판독 (희석 물량 표)
+    ai = None
+    if time_left() > 200:
+        try:
+            ai = deep_ai(it["t"], it["name"], fs)
+        except Exception as e:
+            log.warning("%s 심층 AI 실패: %s", it["t"], e)
+    inst = []
+    for x in (ai or {}).get("inst") or []:
+        q, pr = _num(x.get("qty")), _num(x.get("price"))
+        if not q and x.get("kind") not in ("ELOC",):
+            continue
+        inst.append({"kind": x.get("kind") or "기타", "holder": (x.get("holder") or "")[:40], "qty": q, "price": pr,
+                     "locked": bool(x.get("locked")), "note": (x.get("note") or "")[:70],
+                     "itm": pr is not None and p and pr <= p})
+    inst.sort(key=lambda x: (x["locked"], x["price"] if x["price"] is not None else 1e9))
+    out["biz"] = (ai or {}).get("biz")
+    out["eloc"] = (ai or {}).get("eloc")
+    out["atm"] = (ai or {}).get("atm")
+    out["cash"]["note"] = (ai or {}).get("cash_note")
+    out["inst"] = inst
+    tot = sum(x["qty"] or 0 for x in inst)
+    sell_now = sum(x["qty"] or 0 for x in inst if not x["locked"] and (x["price"] is None or x["price"] <= p * 1.0001))
+    out["dil"] = {"total": tot, "pct": tot / sh * 100 if sh and tot else None, "sh": sh,
+                  "now": sell_now, "locked": sum(x["qty"] or 0 for x in inst if x["locked"])}
+    # ── 가격 사다리 (위: 물량·탈출가·매물대 / 아래: 지지선)
+    lad = []
+    tp = it.get("trade") or {}
+    if out.get("baby", {}).get("escape") and out["baby"]["escape"] > p:
+        lad.append({"px": out["baby"]["escape"], "k": "baby shelf 탈출가 — 증자 한도 해제", "c": "vio"})
+    for x in inst:
+        if x["price"] and p * 0.3 < x["price"] < p * 6:
+            q = f" {x['qty'] / 1e6:.1f}M주" if x["qty"] else ""
+            lad.append({"px": x["price"], "k": f"{x['kind']} 행사·전환가{q}" + (f" ({x['holder']})" if x["holder"] else ""),
+                        "c": "red" if not x["locked"] else "org", "chip": "잠김" if x["locked"] else "출회 가능"})
+    for r in resistances(df, p) if df is not None else []:
+        lad.append({"px": r, "k": "매물대(6개월 고점)", "c": "org"})
+    if tp:
+        lad.append({"px": tp["e1"], "k": f"지지선 — {tp['e1k']} (1차 매수)", "c": "grn"})
+        lad.append({"px": tp["e2"], "k": f"지지선 — {tp['e2k']} (2차 매수)", "c": "grn"})
+        lad.append({"px": tp["stop"], "k": "손절선", "c": "red"})
+    lad.append({"px": p, "k": "현재가", "c": "now"})
+    lad = sorted({round(x["px"], 6): x for x in lad}.values(), key=lambda x: -x["px"])
+    for x in lad:
+        x["pct"] = round((x["px"] / p - 1) * 100, 1) if p else None
+    out["ladder"] = lad[:12]
+    # ── 상단 돌파 가능성: 목표가까지 머리 위 물량 vs 펌핑일 거래량
+    tgt = tp.get("t1") or (p * 1.25)
+    over = sum(x["qty"] or 0 for x in inst if not x["locked"] and x["price"] is not None and x["price"] <= tgt)
+    vmax = float(df["Volume"].iloc[-126:].max()) if df is not None and len(df) else 0
+    ratio = over / vmax if vmax else None
+    out["break"] = {"tgt": tgt, "over": over, "vmax": vmax, "ratio": None if ratio is None else round(ratio, 2),
+                    "verdict": "물량 정보 없음" if not inst else "소화 가능" if (ratio or 0) <= 0.5 else
+                    "보통" if ratio <= 1.5 else "부담 큼"}
+    # ── 플러스·마이너스 근거
+    pl, mi = [], []
+    if tp.get("t1"):
+        pl.append(f"바로 위 목표 {P(tp['t1'])}까지 +{(tp['t1'] / p - 1) * 100:.0f}%")
+    if out.get("baby", {}).get("active") and (rw or 99) < 12:
+        pl.append(f"현금 필요 + baby shelf 상태 → 탈출가 {P(out['baby']['escape'])}까지 띄울 동기")
+    if out["break"]["verdict"] == "소화 가능" and inst:
+        pl.append("머리 위 물량이 펌핑일 거래량으로 소화 가능한 수준")
+    if sell_now:
+        mi.append(f"현재가 이하에서 바로 팔 수 있는 물량 {sell_now / 1e6:.1f}M주")
+    if (out.get("eloc") or {}).get("active"):
+        mi.append("ELOC 활성 — 오르면 회사가 주식을 계속 팔 수 있음")
+    if (out.get("atm") or {}).get("active") or atm:
+        mi.append("ATM(시장가 증자) 사용 가능")
+    if dep and days_ago(dep, today) > -90:
+        mi.append(f"현금 소진 예상 {dep[:7]} — 곧 증자 필요")
+    if any(t["name"] == "부도 위험" for t in it.get("tags", [])):
+        mi.insert(0, "부도·파산 위험")
+    out["plus"], out["minus"] = pl, mi
+    return out
+
+
+def run_deep(items: list, pred: dict | None, today: date):
+    t0 = time.time()
+    pick = [it for it in items if it.get("watch")]
+    sure = set()
+    for z in ((pred or {}).get("horizons") or {}).values():
+        sure |= {c["t"] for c in z.get("cands", [])[:10]}
+    pick += [it for it in items if it["t"] in sure]
+    pick += items[:DEEP_TOP]
+    done = 0
+    for it in dict((x["t"], x) for x in pick).values():
+        if time.time() - t0 > DEEP_BUDGET or time_left() < 200:
+            log.warning("심층 분석 시간 초과 — %d종목까지", done)
+            break
+        try:
+            fs = FS_ALL.get(it["t"]) or []
+            _, fin = sec_cached(it.get("cik"))
+            it["deep"] = deep_analysis(it, PRICES.get(it["t"]), fs, fin, today)
+            it["deep"]["holders"] = holders(fs, it["name"], today)
+            done += 1
+        except Exception as e:
+            log.warning("%s 심층 분석 실패: %s", it["t"], e)
+    pcache_save()
+    log.info("심층 분석 %d종목 (AI 새로 읽음 %d) %.0f초", done, _deep["new"], time.time() - t0)
 
 
 # ───────────────── 8. 출력 ─────────────────
@@ -1839,12 +2261,12 @@ def main():
                 pass
             t_p = time.time()
             dil_hi = {d["t"] for d in DILUTION if d["risk"] == "높음"}
-            RISKY = ("ATM·공모", "공모 준비", "물량 출회", "공시 지연")
+            RISKY = ("ATM·공모", "공모 준비", "물량 출회", "공시 지연", "부도 위험")
             info = {it["t"]: {"name": it["name"],
                               "risk": [t["name"] for t in it["tags"] if t["name"] in RISKY]
                               + (["희석 위험 높음"] if it["t"] in dil_hi else [])} for it in items}
             PRED = predmod.run(PRICES, info, target_session(),
-                               OUT.parent / "pred_log.json", fx)
+                               OUT.parent / "pred_log.json", fx, check=distress_news)
             log.info("예측 모델 %.0f초 · 기간 %s", time.time() - t_p, list((PRED or {}).get("horizons", {})))
             fa = (PRED or {}).get("fail") or {}
             ready = {h: v for h, v in fa.items() if v.get("ready")}
@@ -1858,6 +2280,10 @@ def main():
                 PRED["fail_ai"] = c[key]
         except Exception as e:
             log.exception("예측 실패: %s", e)
+    try:
+        run_deep(items, PRED, datetime.now(KST).date())
+    except Exception as e:
+        log.exception("심층 분석 실패: %s", e)
     for it in items[:AI_TOP]:                       # AI 판단은 예측 다음 (시간 남는 만큼)
         if time_left() < 150:
             break

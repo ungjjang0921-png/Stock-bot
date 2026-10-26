@@ -174,7 +174,7 @@ def _evaluate(ev, score, H, th, gcol, dcol, pk_med, dd_med, pk_pred=None):
 
 
 def run(prices: dict[str, pd.DataFrame], info: dict[str, dict], cutoff: date, log_path: Path,
-        fx: float | None) -> dict:
+        fx: float | None, check=None) -> dict:
     frames = []
     for t, df in prices.items():
         if df is None or len(df) < 80:
@@ -273,7 +273,12 @@ def run(prices: dict[str, pd.DataFrame], info: dict[str, dict], cutoff: date, lo
             sc = round(float(p_now[i]), 1)
             bk = next((k for k in sorted(cal, reverse=True) if sc >= k), None)
             prob = cal[bk]["p"] if bk is not None else None
-            risk = (info.get(t) or {}).get("risk") or []
+            risk = list((info.get(t) or {}).get("risk") or [])
+            if check:                      # 상위 후보만 최근 뉴스로 부도·채무조정 확인
+                try:
+                    risk += check(t)
+                except Exception:
+                    pass
             sure = sure_cut is not None and sc >= sure_cut and not risk
             top = sorted(zip(FEATS, (Xn_now[i] * w)), key=lambda x: -x[1])[:3]
             rsi_v = float(latest["rsi"].iloc[i]) * 100

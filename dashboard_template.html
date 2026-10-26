@@ -55,6 +55,35 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .card.open .detail{display:block}
 .sec{margin-bottom:12px}
 .sec h3{font-size:12px;color:var(--accent);margin:0 0 6px;font-weight:700}
+.dp{margin:0 12px 12px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#0d1520}
+.dp>h4{margin:0;padding:10px 12px;font-size:13.5px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.dp>h4 small{font-weight:400;color:var(--muted);font-size:10.5px}
+.dp .bz{padding:8px 12px;font-size:12.5px;line-height:1.55;border-bottom:1px dashed var(--line)}
+.dp .ds{padding:10px 12px;border-bottom:1px solid var(--line)}
+.dp .ds:last-child{border-bottom:0}
+.dp .dt{font-weight:800;font-size:12.5px;margin-bottom:6px;border-left:3px solid var(--bad);padding-left:7px}
+.dp .dt small{font-weight:400;color:var(--muted);font-size:10.5px;margin-left:4px}
+.ld{display:grid;grid-template-columns:auto 44px 1fr;gap:6px;align-items:center;padding:5px 6px;border-radius:6px;font-size:12px}
+.ld b{font-family:var(--mono);font-size:13px}.ld i{font-style:normal;font-size:10.5px;color:var(--muted);text-align:right}
+.ld.vio{background:rgba(180,156,255,.12)}.ld.vio b{color:var(--violet)}
+.ld.red b{color:var(--bad)}.ld.org b{color:var(--warn)}.ld.grn b{color:var(--good)}
+.ld.now{background:rgba(94,200,255,.13)}.ld.now b{color:var(--accent)}
+.chp{font-size:10px;border:1px solid currentColor;border-radius:4px;padding:0 4px;margin-left:4px;white-space:nowrap}
+.chp.r{color:var(--bad)}.chp.o{color:var(--warn)}.chp.g{color:var(--good)}
+.pmL{margin-top:8px;font-size:11.5px;line-height:1.6}.pmL .p{color:var(--good)}.pmL .m{color:var(--bad)}
+.bby{margin-top:8px;padding:6px 8px;border-radius:8px;background:rgba(245,184,74,.12);border:1px solid rgba(245,184,74,.35);font-size:11.5px}
+.dsum{display:flex;flex-wrap:wrap;gap:10px;font-size:11.5px;color:var(--muted);margin-bottom:6px}.dsum b{color:var(--text);font-family:var(--mono)}
+.irow{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:7px 0;border-top:1px dashed var(--line);font-size:12px}
+.irow .k{font-weight:700}.irow .k small{display:block;font-weight:400;color:var(--muted);font-size:10.5px}
+.irow .q{text-align:right;font-family:var(--mono)}.irow .q small{display:block;color:var(--muted);font-size:10.5px;font-family:inherit}
+.irow .n{grid-column:1/-1;color:var(--muted);font-size:10.5px}
+.brk{margin-top:8px;padding:8px;border-radius:8px;background:var(--panel2);font-size:11.5px;line-height:1.6}
+.kv2{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12px}.kv2 dt{color:var(--muted)}.kv2 dd{margin:0}
+.ev{display:grid;grid-template-columns:86px 44px 1fr;gap:6px;padding:5px 0;border-top:1px dashed var(--line);font-size:12px;align-items:center}
+.ev .d{font-family:var(--mono);font-size:11.5px}.ev .dd{font-size:10.5px;color:var(--warn);font-weight:700}
+.hrow{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:7px 0;border-top:1px dashed var(--line);font-size:12px}
+.hrow small{color:var(--muted);font-size:10.5px}.hrow .a{text-align:right;font-weight:700}
+.hrow .a.s{color:var(--bad)}.hrow .a.b{color:var(--good)}
 .ck{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}
 .ck span:before{content:"✕ ";color:var(--bad)}
 .ck span.ok:before{content:"✓ ";color:var(--good)}
@@ -339,7 +368,7 @@ function card(it, i){
     <div class="tags">${tags || '<span class="tag">뚜렷한 동기 없음</span>'}</div>
     ${aiBadge(it)}
     ${probBlock(it)}
-    ${tradeBlock(it)}
+    ${tradeBlock(it)}${it.deep ? `<div style="margin:-4px 12px 10px;font-size:11.5px;color:var(--violet)">🔬 심층 분석(진입 판단·희석 물량·현금 조달·보유자) — 카드를 누르면 펼쳐져요</div>` : ""}
     <div class="plan">
       <div><small>참고 진입가</small><b>${usd(it.price)}</b></div>
       <div><small>유사군 예상 고점</small><b class="up">${it.target ? usd(it.target) : "-"}</b>${up>0?`<small>+${up.toFixed(0)}% · ${s.median.toFixed(2)}배</small>`:""}</div>
@@ -347,6 +376,7 @@ function card(it, i){
     </div>
     <div class="detail">
       ${it.ai ? `<div class="sec"><h3>🧠 AI 관점·종합 판단</h3><div class="ai">${esc(it.ai)}</div></div>` : ""}
+      ${deepBlock(it) ? `<div style="margin:0 -12px">${deepBlock(it)}</div>` : ""}
       ${snapBlock(it)}
       <div class="sec"><h3>차트 진입 조건 ${it.stage}/5</h3><div class="ck">${checks}</div></div>
       <div class="sec"><h3>과거 유사 사례 (같은 단계 · ${DATA.forward}거래일)</h3>
@@ -373,6 +403,45 @@ const head = (c, i, sub) => `<div class="ch"><div class="rank ${i<3?'r'+(i+1):''
 function aiOf(t){
   const it = DATA.items.find(x => x.t === t);
   return it && it.ai ? aiBadge(it) + `<div class="ai" style="margin:0 12px 12px">${esc(it.ai)}</div>` : "";
+}
+function deepBlock(it){
+  const d = it && it.deep; if (!d) return "";
+  const p = it.price, sh = n => n == null ? "-" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(0) + "K" : n.toFixed(0);
+  const pc = v => v == null || !p ? "" : `${v >= p ? "+" : ""}${((v / p - 1) * 100).toFixed(0)}%`;
+  const lad = (d.ladder || []).map(x => `<div class="ld ${esc(x.c)}"><b>${usd(x.px)}</b><i>${x.c === "now" ? "" : (x.pct >= 0 ? "+" : "") + x.pct + "%"}</i><span>${esc(x.k)}${x.chip ? `<span class="chp ${x.chip === "잠김" ? "o" : "r"}">${esc(x.chip)}</span>` : ""}</span></div>`).join("");
+  const pm = (d.plus || []).map(x => `<div class="p">＋ ${esc(x)}</div>`).join("") + (d.minus || []).map(x => `<div class="m">－ ${esc(x)}</div>`).join("");
+  const b = d.baby;
+  const baby = b && b.active ? `<div class="bby">⚠️ <b>baby shelf</b> 상태 · 유통 시총 ${big(b.pf)} → 1년 증자 한도 약 ${big(b.cap)} · 탈출가 <b>${usd(b.escape)}</b> (${pc(b.escape)})</div>` : "";
+  const dl = d.dil || {};
+  const inst = (d.inst || []).map(x => `<div class="irow"><div class="k">${esc(x.kind)}<small>${esc(x.holder || "보유자 미상")}</small></div>
+      <div class="q">${sh(x.qty)}주<small>${x.price != null ? usd(x.price) + " " + pc(x.price) : "가격 변동형"}</small></div>
+      <div class="n"><span class="chp ${x.locked ? "o" : "r"}">${x.locked ? "잠김" : "출회 가능"}</span>${x.itm ? '<span class="chp r">현재가 이하</span>' : ""} ${esc(x.note)}</div></div>`).join("");
+  const br = d.break || {};
+  const c = d.cash || {};
+  const el = d.eloc || {}, at = d.atm || {};
+  const evs = (it.ddays || []).map(x => `<div class="ev"><span class="d">${esc(x.date)}</span><span class="dd">D${x.d >= 0 ? "-" : "+"}${Math.abs(x.d)}</span><span>${esc(x.label)}</span></div>`).join("");
+  const hs = (d.holders || []).map(h => `<div class="hrow"><div><b>${esc(h.name)}</b><br><small>${esc(h.role || "")}${h.pct != null ? " · 지분 " + h.pct + "%" : ""}${h.own ? " · 보유 " + sh(h.own) + "주" : ""} · ${esc(h.forms.join(", "))}</small></div>
+      <div class="a ${h.act === "매도 중" ? "s" : h.act === "매수" ? "b" : ""}">${esc(h.act)}${h.sell ? `<br><small>매도 ${sh(h.sell)}주</small>` : ""}${h.buy ? `<br><small>매수 ${sh(h.buy)}주</small>` : ""}${h.plan ? `<br><small>매도 예정 ${sh(h.plan)}주</small>` : ""}</div></div>`).join("");
+  return `<div class="dp"><h4>🔬 심층 분석 <small>SEC 공시 기준 · ${esc(d.asof)}</small></h4>
+    ${d.biz ? `<div class="bz">${esc(d.biz)}</div>` : ""}
+    <div class="ds"><div class="dt">진입 판단 <small>희석 물량·조달 가격·지지선을 한 줄로</small></div>${lad}${baby}${pm ? `<div class="pmL">${pm}</div>` : ""}</div>
+    <div class="ds"><div class="dt">희석 물량 <small>워런트·전환우선주·PFW·ELOC — 누가 얼마에 팔 수 있나</small></div>
+      ${(d.inst || []).length ? `<div class="dsum"><span>총 희석 가능 <b>${sh(dl.total)}주</b>${dl.pct != null ? ` (발행의 ${dl.pct.toFixed(0)}%)` : ""}</span><span>지금 출회 가능 <b style="color:var(--bad)">${sh(dl.now)}주</b></span><span>잠김 <b>${sh(dl.locked)}주</b></span></div>${inst}
+      <div class="brk"><b>상단 돌파 가능성: <span class="${br.verdict === "소화 가능" ? "up" : br.verdict === "부담 큼" ? "dn" : ""}">${esc(br.verdict)}</span></b><br>
+        목표 ${usd(br.tgt)} (${pc(br.tgt)})까지 머리 위 출회 물량 <b>${sh(br.over)}주</b> · 6개월 최대 거래량 ${sh(br.vmax)}주 대비 ×${br.ratio ?? "-"}<br>
+        <small style="color:var(--muted)">×0.5 이하 소화 가능 · ×1.5 이상 부담</small></div>`
+      : `<div class="mut" style="font-size:11.5px;color:var(--muted)">아직 AI가 공시를 읽지 않았어요 (실행마다 몇 종목씩 채워져요)</div>`}
+      <div class="mut" style="font-size:10.5px;color:var(--muted);margin-top:6px">AI가 10-Q·8-K·424B 원문에서 추출 — 큰 결정 전엔 원문 확인</div></div>
+    <div class="ds"><div class="dt">현금 조달 <small>얼마나 버티고 어떻게 돈을 구하나</small></div><dl class="kv2">
+      <dt>현금</dt><dd>${big(c.cash)}${c.burn ? ` · 월 소진 ${c.burn <= 0 ? "흑자" : big(c.burn)}` : ""}</dd>
+      <dt>소진 예상</dt><dd>${c.deplete ? `<b class="dn">${esc(c.deplete.slice(0, 7))}</b>` : c.runway >= 99 ? "흑자" : "-"}</dd>
+      <dt>Shelf</dt><dd>${esc(c.shelf || "없음")}</dd>
+      <dt>ATM</dt><dd>${at.active || c.atm424 ? `<b class="dn">활성</b> ${esc(at.size || "")} ${esc(at.agent || "")}${c.atm424 ? " · 424B5 " + esc(c.atm424) : ""}` : "없음"}</dd>
+      <dt>ELOC</dt><dd>${el.active ? `<b class="dn">활성</b> ${esc(el.size || "")} · ${esc(el.terms || "")}` : "없음"}</dd>
+      ${c.note ? `<dt>계획</dt><dd>${esc(c.note)}</dd>` : ""}</dl></div>
+    ${evs ? `<div class="ds"><div class="dt">예정 이벤트 <small>공시 기한·상장 유지 기한</small></div>${evs}</div>` : ""}
+    <div class="ds"><div class="dt">보유자·내부자 <small>13D/G·Form 4·144 — 누가 사고 누가 파나</small></div>${hs || '<div style="font-size:11.5px;color:var(--muted)">최근 1년 보유자 공시 없음</div>'}</div>
+  </div>`;
 }
 function tradeBlock(it){
   const t = it && it.trade; if (!t) return "";
@@ -425,15 +494,15 @@ function pcMore(t){
   if (!it) return "";
   const tags = (it.tags || []).map(g => `<span class="tag ${tagCls(g)}">${esc(g.name)}<em>${esc(g.level)}</em></span>`).join("");
   return `<div class="pm">${tradeBlock(it)}
-    <div class="pmx">${aiBadge(it)}${tags ? `<div class="tags">${tags}</div>` : ""}${probBlock(it)}
+    <div class="pmx">${deepBlock(it).replace('class="dp"', 'class="dp" style="margin:0 0 10px"')}${aiBadge(it)}${tags ? `<div class="tags">${tags}</div>` : ""}${probBlock(it)}
       ${it.ai ? `<div class="ai" style="margin:0 0 10px">${esc(it.ai)}</div>` : ""}
       <a class="go" href="#" onclick="openCard('${esc(t)}');return false">워치에서 전체 보기 →</a></div>
-    <div class="pmt" onclick="pcToggle('${esc(t)}')">▼ AI 판단·급등 확률·태그 더 보기</div></div>`;
+    <div class="pmt" onclick="pcToggle('${esc(t)}')">▼ 심층 분석·AI 판단·급등 확률 더 보기</div></div>`;
 }
 function pcToggle(t){
   const el = document.getElementById("pc-" + t); if (!el) return;
   el.classList.toggle("open");
-  const b = el.querySelector(".pmt"); if (b) b.textContent = el.classList.contains("open") ? "▲ 접기" : "▼ AI 판단·급등 확률·태그 더 보기";
+  const b = el.querySelector(".pmt"); if (b) b.textContent = el.classList.contains("open") ? "▲ 접기" : "▼ 심층 분석·AI 판단·급등 확률 더 보기";
 }
 function openCard(t){
   TAB = "all"; $("#q").value = t; syncTabs(); render();
@@ -477,7 +546,7 @@ function render(){
     const shown = (window.PS || "sure") === "sure" ? z.cands.filter(c => c.sure) : z.cands;
     if (!shown.length) h += '<div class="empty">오늘은 확실 후보가 없어요 — 억지로 고르지 않아요. "전체"에서 참고 순위를 볼 수 있어요.</div>';
     h += shown.map((c, i) => `<div class="pc" id="pc-${esc(c.t)}"><div class="h" onclick="pcToggle('${esc(c.t)}')" style="cursor:pointer"><div><b>${i + 1}. ${esc(c.t)}</b><small>${esc((c.name || "").slice(0, 26))}</small></div>
-        <span class="tg ${c.sure ? 't-grn' : c.risk && c.risk.length ? 't-red' : ''}" style="font-size:11px">${c.sure ? "🎯 " : ""}판별 ${c.score}점 · ${c.prob != null ? "검증 " + c.prob + "%" : "확률 미제시"}</span></div>
+        <span class="tg ${c.sure ? 't-grn' : c.risk && c.risk.length ? 't-red' : ''}" style="font-size:11px">${c.sure ? "🎯 " : ""}판별 ${c.score}점 · ${c.prob != null ? "검증 " + c.prob + "%" + (z.base ? ` (평균 ${(+z.base).toFixed(0)}%)` : "") : "확률 미제시"}</span></div>
       <div class="g"><div>현재가<b>${pfmt(c.px)}</b>${krw(c.px)} <span class="${c.chg >= 0 ? 'up' : 'dn'}">${c.chg >= 0 ? "+" : ""}${c.chg}%</span></div>
         <div>조건부 고점<b class="up">${pfmt(c.peak)}</b>여력 +${c.up}%</div><div>조건부 예상일<b>${esc(c.day.slice(5))}</b>미국</div></div>
       ${c.why.length ? `<div class="wy">${c.rsi20 ? `<b style="color:#6be3a4">📉 RSI ${c.rsi} — 20 근처</b> · ` : `RSI ${c.rsi} · `}근거: ${c.why.map(esc).join(" · ")}</div>` : ""}${c.risk && c.risk.length ? `<div class="wy" style="color:#ff8f8f">⚠️ 제외 사유: ${c.risk.map(esc).join(" · ")}</div>` : ""}${pcMore(c.t)}</div>`).join("");
