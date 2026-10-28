@@ -371,7 +371,8 @@ def ledger(out: dict, prices: dict, path: Path) -> list[dict]:
                              "ref": cnd["px"], "peak": cnd["peak"], "day": cnd["day"], "th": hz["th"],
                              "score": cnd["score"], "sure": cnd_sure, "res": None, "act_peak": None, "act_day": None})
     for e in book:
-        if e["res"] in ("적중", "미적중"):
+        if e["res"] == "미적중" or e.get("done"):
+            e["done"] = True
             continue
         df = prices.get(e["t"])
         if df is None:
@@ -381,6 +382,10 @@ def ledger(out: dict, prices: dict, path: Path) -> list[dict]:
         if not len(after):
             continue
         win = after.iloc[:e["h"]]
+        e["done"] = len(win) >= e["h"]               # 기간(거래일)이 다 지났나
+        e["days"] = len(win)
+        if e["res"] == "적중":
+            continue
         hi = float(win["High"].max())
         e["act_peak"] = hi
         e["act_day"] = win["High"].idxmax().date().isoformat()
@@ -395,14 +400,19 @@ def ledger(out: dict, prices: dict, path: Path) -> list[dict]:
     path.write_text(json.dumps(book, ensure_ascii=False), encoding="utf-8")
     res = {}
     for H in HORIZONS:
-        xs = [e for e in book if e["h"] == H and e["res"] in ("적중", "미적중")]
+        run_ = [e for e in book if e["h"] == H and not e.get("done")]
+        early = {"n": len(run_), "k": sum(e["res"] == "적중" for e in run_)}
+        # 적중은 기간 중간에도 확정되지만 미적중은 기간이 끝나야 확정 → 기간이 끝난 것만 세야 공정
+        xs = [e for e in book if e["h"] == H and e.get("done") and e["res"] in ("적중", "미적중")]
+        res[str(H)] = {"early": early}
         if xs:
             k = sum(e["res"] == "적중" for e in xs)
             lo, hi = _wilson(k, len(xs))
-            res[str(H)] = {"k": k, "n": len(xs), "rate": round(k / len(xs) * 100, 1), "lo": lo, "hi": hi}
+            res[str(H)].update({"k": k, "n": len(xs), "rate": round(k / len(xs) * 100, 1), "lo": lo, "hi": hi})
             ss = [e for e in xs if e.get("sure")]
             if ss:
                 ks = sum(e["res"] == "적중" for e in ss)
                 res[str(H)]["sure"] = {"k": ks, "n": len(ss), "rate": round(ks / len(ss) * 100, 1)}
     out["ledger_stat"] = res
-    return [e for e in reversed(book)][:150]
+    show = sorted(book, key=lambda e: (e["asof"], -e["rank"]))      # 최근 기준일 먼저, 같은 날은 1위부터
+    return [e for e in reversed(show)][:300]
