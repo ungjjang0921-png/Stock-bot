@@ -38,12 +38,15 @@ import predict as predmod
 import report
 
 # ═════════════════════ 설정 ═════════════════════
-EXCHANGES = ["NASDAQ"]
+EXCHANGES = ["NASDAQ", "AMEX", "NYSE"]   # 나스닥 + NYSE American(소형주 많음) + NYSE (시총 상한으로 대형주 제외)
 MIN_PRICE, MAX_PRICE = 0.01, 5.0
 MAX_MCAP = 300e6                  # 시총 상한 (하한 없음 — 초소형주도 포함)
 MIN_AVG_VOL = 100_000
 MAX_UNIVERSE = 400                # 평균 거래량 상위
 TODAY_TOP = 100                   # + 오늘 거래량 상위 (당일 급등주 포함용)
+GAINER_TOP = 60                   # + 오늘 상승률 상위 (토스 급상승처럼 — 가격 상한 완화)
+GAINER_MAX_PRICE = 20.0
+GAINER_MAX_MCAP = 500e6
 FORWARD_DAYS = 60
 SURGE_REG = 0.20                  # 본장 급등 기준: 전일 종가 대비 고가 +20% 터치
 SURGE_PRE = 0.10                  # 프리장 급등 기준: 전일 종가 대비 프리장 고가 +10% 터치
@@ -144,6 +147,14 @@ def universe() -> list[dict]:
             {"left": "average_volume_10d_calc", "operation": "greater", "right": MIN_AVG_VOL}]
     rows = tv_scan(base, "average_volume_10d_calc", MAX_UNIVERSE) + tv_scan(base, "volume", TODAY_TOP)
     rows = [r for r in rows if r["mcap"] is None or r["mcap"] <= MAX_MCAP]
+    # 오늘 급등주: 프리장·본장 상승률 상위 (주가 $20·시총 $5억까지 — 급등으로 커진 소형주도 포함)
+    gbase = [{"left": "exchange", "operation": "in_range", "right": EXCHANGES},
+             {"left": "type", "operation": "in_range", "right": ["stock", "dr"]},
+             {"left": "close", "operation": "in_range", "right": [MIN_PRICE, GAINER_MAX_PRICE]},
+             {"left": "volume", "operation": "greater", "right": 300_000}]
+    sess_chg = "premarket_change" if datetime.now(ET).time() < dtime(9, 30) else "change"
+    gain = tv_scan(gbase, sess_chg, GAINER_TOP) or tv_scan(gbase, "change", GAINER_TOP)
+    rows += [r for r in gain if r["mcap"] is None or r["mcap"] <= GAINER_MAX_MCAP]
     watch = watch_tickers()
     if watch:   # 텔레그램 관심종목은 조건과 무관하게 포함
         sym = [f"{ex}:{t.replace('-', '.')}" for t in watch for ex in ("NASDAQ", "NYSE", "AMEX")]
