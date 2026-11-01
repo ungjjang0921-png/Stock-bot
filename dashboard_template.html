@@ -21,6 +21,7 @@ select{flex:0 0 auto;max-width:46%}
 .chips{display:flex;gap:6px;overflow-x:auto;margin-top:8px;padding-bottom:2px;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
 .hot{background:var(--panel);border:1px solid #5a2b33;border-radius:12px;padding:8px 12px;margin-bottom:10px}
+.sqc.fire{border-color:#5a2b33}.sqc.warm{border-color:#5a4a2b}
 .hot .hh{font-weight:800;font-size:13.5px;margin-bottom:4px}.hot .hh small{font-weight:400;color:var(--muted);font-size:10.5px;margin-left:4px}
 .hot .hr{display:grid;grid-template-columns:58px 1fr auto 62px;gap:6px;align-items:center;padding:6px 0;border-top:1px dashed var(--line);font-size:12.5px;cursor:pointer}
 .hot .hr span{color:var(--muted);font-size:11px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
@@ -243,7 +244,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 <header>
   <h1>🎯 펌핑 목적 워치리스트</h1>
   <div class="sub" id="sub"></div>
-  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="surge">🚀 급등</span><span class="tab" data-v="jb">🎯 종배</span><span class="tab" data-v="pred">🔮 예측</span><span class="tab" data-v="cal">📅 일정</span><span class="tab" data-v="dil">💧 희석</span></div>
+  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="surge">🚀 급등</span><span class="tab" data-v="jb">🎯 종배</span><span class="tab" data-v="pred">🔮 예측</span><span class="tab" data-v="cal">📅 일정</span><span class="tab" data-v="sq">🩳 숏스퀴즈</span></div>
   <div class="controls" id="ctl">
     <input id="q" placeholder="티커·회사명 검색" autocomplete="off">
     <select id="sort">
@@ -398,6 +399,16 @@ function card(it, i){
   </article>`;
 }
 
+let HOTON = false;
+function renderHot(){
+  const box = document.getElementById("hotbox"); if (!box) return;
+  if (!HOTON){ box.innerHTML = ""; return; }
+  const chgOf = it => (it.snap && it.snap.chg != null) ? it.snap.chg : (it.chg || 0);
+  const rows = DATA.items.filter(it => chgOf(it) >= 15).sort((a, b) => chgOf(b) - chgOf(a)).slice(0, 10);
+  if (!rows.length){ box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="hot"><div class="hh">🔥 지금 급등 중 <small>오늘 +15% 이상 · ${esc(DATA.updated)} 기준 · 누르면 상세</small></div>
+    ${rows.map(it => `<div class="hr" onclick="openCard('${esc(it.t)}')"><b>${esc(it.t)}</b><span>${esc((it.name || "").slice(0, 22))}</span><em>${usd(it.price)}</em><i class="up">+${chgOf(it).toFixed(1)}%</i></div>`).join("")}</div>`;
+}
 let TAB = "all";   // 처음엔 기존 워치리스트 화면
 const kp = (label, v, sub, cls) => `<div><small>${label}</small><b class="${cls || ''}">${v}</b>${sub ? `<em>${sub}</em>` : ""}</div>`;
 const scn = lines => `<div class="scn">${lines.map(l => `<div><b class="s-${esc(l.k)}">${esc(l.k)}</b><span>${esc(l.t)}</span></div>`).join("")}</div>`;
@@ -590,16 +601,29 @@ function render(){
     $("#list").innerHTML = xs.length ? h : h + '<div class="empty">14일 안에 확인된 일정이 없어요</div>';
     return;
   }
-  if (TAB === "dil"){
-    const xs = DATA.dil || [];
-    const big = v => v == null ? "-" : v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : (v / 1e3).toFixed(0) + "K";
-    $("#sub").textContent = `${DATA.updated} 업데이트 · 희석·유상증자 위험 순`;
-    $("#list").innerHTML = `<div class="intro">💧 <b>희석·유증 위험</b> — ATM(시장가 증자)·공모 준비·미등록 발행·재판매 물량·Shelf·현금 소진, 그리고 <b>실제 발행주식 증가율</b>(SEC 기준, 약 5개월+ 전 대비)로 매긴 위험도예요. 위험 높은 종목은 급등해도 물량이 쏟아질 수 있어요.</div>`
-      + (xs.map(d => `<div class="drow" onclick="openCard('${esc(d.t)}')"><div class="dh"><b>${esc(d.t)} <small style="font-weight:400;color:var(--muted);font-size:11px">${esc(d.name).slice(0, 26)}</small></b><span class="risk ${esc(d.risk)}">희석 ${esc(d.risk)}</span></div>
-        <div class="chipsm" style="padding:8px 0 0">${d.flags.map(f => `<span class="rk">${esc(f)}</span>`).join("")}</div>
-        <div class="dg"><div>주식수 증가<b class="${d.growth > 0 ? 'dn' : ''}">${d.growth == null ? "-" : (d.growth >= 0 ? "+" : "") + d.growth.toFixed(0) + "%"}</b>${d.sh_prev_date ? esc(d.sh_prev_date.slice(2, 7)) + "→" + esc((d.sh_date || "").slice(2, 7)) : ""}</div>
-        <div>발행주식<b>${big(d.sh_now)}</b>유통 ${big(d.float)}</div><div>최근 희석공시<b>${d.last ? esc(d.last.slice(5)) : "-"}</b>${pfmt(d.price)}</div></div></div>`).join("")
-        || '<div class="empty">희석 위험 종목이 없어요</div>');
+  if (TAB === "sq"){
+    const xs = DATA.sq || [];
+    const sh = v => v == null ? "-" : v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : (v / 1e3).toFixed(0) + "K";
+    $("#sub").textContent = `${DATA.updated} 업데이트 · 숏스퀴즈 점수순`;
+    $("#list").innerHTML = `<div class="intro">🩳 <b>숏스퀴즈 후보</b> — 공매도가 많이 쌓였고(유통 대비 %), 빌린 주식 이자가 비싸고, 유통 물량이 적은 종목이에요. 이런 종목은 <b>거래량이 터지며 오르면</b> 공매도 세력이 손실을 줄이려 되사면서(숏커버) 급등이 커질 수 있어요.<br><span style="color:var(--muted)">공매도 수치는 거래소 보고 기준(2주마다), 대차 이자는 IBKR 기준이에요. 🔥점화 → ⚡예열 → ⏳대기 순.</span></div>`
+      + (xs.map((c, i) => `<article class="cand sqc ${esc(c.lv)}"><div class="ch"><div class="rank ${i < 3 ? 'r' + (i + 1) : ''}">${i + 1}</div>
+        <div><div class="tk">${esc(c.t)}</div><div class="nm">${esc((c.name || "").slice(0, 28))}</div><span class="ty">${esc(c.st)}</span></div>
+        <div class="cs"><b>${c.score}</b><small>스퀴즈 점수</small></div></div>
+        <div class="kp">
+          ${kp("공매도 / 유통", c.si != null ? c.si.toFixed(1) + "%" : "-", `${sh(c.short)}주${c.short_prev ? ` · 전월 ${sh(c.short_prev)}` : ""}${c.si_date ? " · " + esc(c.si_date) : ""}`, c.si >= 20 ? "up" : "")}
+          ${kp("대차 이자(연)", c.fee != null ? c.fee.toFixed(c.fee < 10 ? 1 : 0) + "%" : "-", c.avail != null ? `빌릴 수 있는 주식 ${c.avail <= 0 ? "없음" : sh(c.avail) + "주"}` : "정보 없음", c.fee >= 50 ? "up" : "")}
+          ${kp("커버 일수", c.dtc != null ? c.dtc.toFixed(1) + "일" : "-", `유통 ${sh(c.float)}주`, c.dtc >= 3 ? "up" : "")}
+        </div>
+        <div class="kp">
+          ${kp("현재가", usd(c.price), c.chg != null ? `<span class="${c.chg >= 0 ? 'up' : 'dn'}">${c.chg >= 0 ? "+" : ""}${c.chg.toFixed(1)}%</span>` : "")}
+          ${kp("오늘 거래량", c.relvol != null ? c.relvol.toFixed(1) + "배" : "-", c.turn != null ? `유통 회전 ${(c.turn * 100).toFixed(0)}%` : "평소 대비", c.relvol >= 3 ? "up" : "")}
+          ${kp("VWAP", usd(c.vwap), c.vwap ? (c.price >= c.vwap ? "위 ✅" : "아래") : "")}
+        </div>
+        <div class="chipsm">${c.why.map(w => `<span>${esc(w)}</span>`).join("")}${c.risk.map(r => `<span class="rk">⚠ ${esc(r)}</span>`).join("")}</div>
+        ${c.trig.length ? `<div class="scn"><div><b class="s-강세">출발</b><span>${c.trig.map(esc).join(" + ")}</span></div>${c.risk.length ? `<div><b class="s-리스크">리스크</b><span>${c.risk.map(esc).join(" · ")} — 오르면 회사가 주식을 팔 수 있어 스퀴즈가 꺾일 수 있음</span></div>` : ""}</div>` : ""}
+        ${tradeBlock(DATA.items.find(x => x.t === c.t))}
+        <a class="go" href="#c-${esc(c.t)}" onclick="openCard('${esc(c.t)}');return false">상세 분석 보기 →</a></article>`).join("")
+        || '<div class="empty">조건에 맞는 숏스퀴즈 후보가 없어요 (공매도 유통 대비 8% 이상)</div>');
     return;
   }
   if (TAB === "jb"){
@@ -624,11 +648,9 @@ function render(){
   xs.sort((a,b) => key(a) - key(b));
   $("#sub").textContent = `${DATA.updated} 업데이트 · ${xs.length}/${DATA.items.length}종목 · 카드를 누르면 상세`;
   const miss = q && !xs.length ? `<div class="empty">'${esc(q.toUpperCase())}'은(는) 목록에 없어요.<br>텔레그램에서 <b>/add ${esc(q.toUpperCase())}</b> 를 보내면<br>다음 업데이트부터 ⭐관심종목으로 포함돼요.</div>` : "";
-  const chgOf = it => (it.snap && it.snap.chg != null) ? it.snap.chg : (it.chg || 0);
-  const hot = DATA.items.filter(it => chgOf(it) >= 15).sort((a, b) => chgOf(b) - chgOf(a)).slice(0, 10);
-  const strip = !q && !on.size && sort !== "chg" && hot.length ? `<div class="hot"><div class="hh">🔥 지금 급등 중 <small>오늘 +15% 이상 · ${esc(DATA.updated)} 기준 · 누르면 상세</small></div>
-    ${hot.map(it => `<div class="hr" onclick="openCard('${esc(it.t)}')"><b>${esc(it.t)}</b><span>${esc((it.name || "").slice(0, 22))}</span><em>${usd(it.price)}</em><i class="up">+${chgOf(it).toFixed(1)}%</i></div>`).join("")}</div>` : "";
-  $("#list").innerHTML = strip + (xs.map(card).join("") || miss || '<div class="empty">조건에 맞는 종목이 없어요</div>');
+  HOTON = !q && !on.size && sort !== "chg";
+  $("#list").innerHTML = '<div id="hotbox"></div>' + (xs.map(card).join("") || miss || '<div class="empty">조건에 맞는 종목이 없어요</div>');
+  renderHot();
 }
 $("#chips").innerHTML = FILTERS.map(f => `<span class="chip" data-f="${f}">${f}</span>`).join("");
 $("#chips").addEventListener("click", e => {

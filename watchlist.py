@@ -2175,6 +2175,143 @@ def run_deep(items: list, pred: dict | None, today: date):
     log.info("심층 분석 %d종목 (AI 새로 읽음 %d) %.0f초", done, _deep["new"], time.time() - t0)
 
 
+# ───────────────── 7-2. 숏스퀴즈 후보 (공매도 비율·대차 이자·유통·거래량) ─────────────────
+SQ_SCAN = 90                  # 공매도 정보를 조회할 후보 수 (유통 작은 순·거래량 순)
+SQ_SHOW = 30
+SQ_TTL = 2 * 3600             # 대차 이자는 2시간마다 새로
+
+
+def borrow_info(t: str) -> dict:
+    """IBKR 대차 가능 수량·이자 (iborrowdesk) — 이자가 높을수록 공매도 유지 비용 큼 → 숏커버 압력"""
+    c = cache_load("borrow")
+    hit = c.get(t)
+    if hit and time.time() - hit.get("_t", 0) < SQ_TTL:
+        return hit
+    out = {"_t": time.time()}
+    try:
+        r = http.get(f"https://iborrowdesk.com/api/ticker/{t}", headers=UA_WEB, timeout=12)
+        if r.status_code == 200:
+            d = r.json()
+            rows = d.get("real_time") or d.get("daily") or []
+            if rows:
+                last = max(rows, key=lambda x: str(x.get("time") or x.get("date") or ""))
+                out.update({"fee": num(last.get("fee")), "avail": num(last.get("available")),
+                            "b_time": str(last.get("time") or last.get("date") or "")[:16]})
+                old = [x for x in rows if x is not last and num(x.get("fee")) is not None]
+                if old:
+                    prev = min(old, key=lambda x: str(x.get("time") or x.get("date") or ""))
+                    out["fee_prev"] = num(prev.get("fee"))
+        elif r.status_code in (403, 429):
+            _sq["borrow_off"] = True
+    except Exception as e:
+        log.warning("%s 대차 정보 실패: %s", t, e)
+    c[t] = out
+    return out
+
+
+_sq = {"borrow_off": False}
+
+
+def short_cached(t: str) -> dict:
+    c = cache_load("short")
+    if t not in c:
+        c[t] = short_info(t)
+    return c[t]
+
+
+def squeeze_score(it: dict, s: dict, b: dict) -> tuple[int, list[str], list[str]]:
+    sn = it.get("snap") or {}
+    pts, why, risk = 0.0, [], []
+    si, dtc, fl = s.get("si"), s.get("dtc"), it.get("float")
+    fee, avail = b.get("fee"), b.get("avail")
+    if si:
+        pts += min(32, si * 1.1)
+        why.append(f"공매도 유통 대비 {si:.0f}%")
+    if s.get("short") and s.get("short_prev") and s["short"] > s["short_prev"] * 1.15:
+        pts += 5
+        why.append(f"공매도 {((s['short'] / s['short_prev']) - 1) * 100:+.0f}% 증가")
+    if dtc:
+        pts += min(10, dtc * 2)
+        if dtc >= 3:
+            why.append(f"커버에 {dtc:.1f}일")
+    if fee is not None:
+        pts += min(25, fee / 4)
+        if fee >= 20:
+            why.append(f"대차 이자 연 {fee:.0f}%")
+        if b.get("fee_prev") is not None and fee > b["fee_prev"] * 1.5 and fee >= 10:
+            pts += 4
+            why.append(f"이자 급등 {b['fee_prev']:.0f}→{fee:.0f}%")
+    if avail is not None:
+        if avail <= 0:
+            pts += 10
+            why.append("빌릴 주식 없음")
+        elif avail < 100_000:
+            pts += 6
+            why.append(f"대차 가능 {avail / 1e3:.0f}K주뿐")
+    if fl:
+        pts += 15 if fl < 5e6 else 10 if fl < 10e6 else 5 if fl < 25e6 else 0
+        if fl < 25e6:
+            why.append(f"유통 {fl / 1e6:.1f}M주")
+    rv, chg = sn.get("relvol"), sn.get("chg")
+    if rv and rv >= 2:
+        pts += min(8, rv * 1.5)
+    if chg is not None and chg >= 10:
+        pts += 5
+    names = {t["name"] for t in it.get("tags", [])}
+    for n, p in (("부도 위험", 30), ("ATM·공모", 10), ("공모 준비", 8), ("물량 출회", 8)):
+        if n in names:
+            pts -= p
+            risk.append(n)
+    return int(round(max(0, min(100, pts)))), why, risk
+
+
+def build_squeeze(items: list) -> list[dict]:
+    t0 = time.time()
+    pool = [it for it in items if (it.get("float") or 9e9) <= 60e6 and it.get("price")]
+    pool.sort(key=lambda it: ((it.get("float") or 9e9) / 1e6) / max((it.get("snap") or {}).get("relvol") or 0.5, 0.5))
+    out = []
+    for it in pool[:SQ_SCAN]:
+        if time_left() < 260 or time.time() - t0 > 240:
+            log.warning("숏스퀴즈 조회 시간 초과 — %d종목까지", len(out))
+            break
+        t = it["t"]
+        s = (it.get("ex") or {}) if (it.get("ex") or {}).get("si") is not None else short_cached(t)
+        if not s.get("si") or s["si"] < 8:
+            continue
+        b = {} if _sq["borrow_off"] else borrow_info(t)
+        sc, why, risk = squeeze_score(it, s, b)
+        sn = it.get("snap") or {}
+        rv, chg, vw, px = sn.get("relvol"), sn.get("chg"), sn.get("vwap"), it["price"]
+        df = PRICES.get(t)
+        hi20 = float(df["High"].iloc[-21:-1].max()) if df is not None and len(df) > 21 else None
+        avgv = (sn.get("vol_day") / rv) if rv and sn.get("vol_day") else None
+        if rv and rv >= 3 and (chg or 0) >= 10 and (not vw or px >= vw):
+            st, lv = "🔥 점화 — 거래량 터지며 상승 중", "fire"
+        elif rv and rv >= 1.5 and (chg or 0) > 0:
+            st, lv = "⚡ 예열 — 거래량 붙기 시작", "warm"
+        else:
+            st, lv = "⏳ 대기 — 거래량 터지면 출발", "wait"
+        trig = []
+        if avgv:
+            trig.append(f"거래량 {avgv * 3 / 1e6:.1f}M주(평소 3배) 이상")
+        if hi20 and hi20 > px:
+            trig.append(f"20일 고점 {P(hi20)}({pct(hi20, px)}) 돌파")
+        out.append({"t": t, "name": it["name"], "price": px, "chg": chg, "score": sc, "why": why, "risk": risk,
+                    "si": s.get("si"), "dtc": s.get("dtc"), "short": s.get("short"), "short_prev": s.get("short_prev"),
+                    "si_date": s.get("si_date"), "fee": b.get("fee"), "fee_prev": b.get("fee_prev"),
+                    "avail": b.get("avail"), "b_time": b.get("b_time"), "float": it.get("float"),
+                    "relvol": rv, "turn": sn.get("turnover"), "vwap": vw, "st": st, "lv": lv, "trig": trig,
+                    "short_val": (s.get("short") or 0) * px})
+    out.sort(key=lambda x: (x["lv"] != "fire", -x["score"]))
+    save_caches()
+    log.info("숏스퀴즈 후보 %d개 (%.0f초, 대차 이자 %s)", len(out), time.time() - t0,
+             "차단됨" if _sq["borrow_off"] else "조회")
+    return out[:SQ_SHOW]
+
+
+SQUEEZE: list = []
+
+
 # ───────────────── 8. 출력 ─────────────────
 def _clean(o):
     if isinstance(o, float):
@@ -2196,7 +2333,7 @@ def write_page(items: list[dict], surge=None, jbc=None) -> None:
     tpl = (ROOT / "dashboard_template.html").read_text(encoding="utf-8")
     payload = _clean({"updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"), "items": items,
                       "forward": FORWARD_DAYS, "surge": surge or [], "jbc": jbc or [],
-                      "cal": CALENDAR, "dil": DILUTION, "pred": PRED,
+                      "cal": CALENDAR, "sq": SQUEEZE, "pred": PRED,
                       "rules": {"reg": int(SURGE_REG * 100), "pre": int(SURGE_PRE * 100), "jb": int(JB_HIT * 100)}})
     data = json.dumps(payload, ensure_ascii=False, default=lambda o: None).replace("</", "<\\/")
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -2291,6 +2428,11 @@ def main():
                 PRED["fail_ai"] = c[key]
         except Exception as e:
             log.exception("예측 실패: %s", e)
+    global SQUEEZE
+    try:
+        SQUEEZE = build_squeeze(items)
+    except Exception as e:
+        log.exception("숏스퀴즈 실패: %s", e)
     try:
         run_deep(items, PRED, datetime.now(KST).date())
     except Exception as e:
