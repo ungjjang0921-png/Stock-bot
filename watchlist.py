@@ -2333,6 +2333,12 @@ def _short_name(n: str) -> str:
 def ko_names(rows: list[tuple[str, str]]) -> dict:
     """[(티커, 영문명)] → {티커: 한글명}. 한 번 정하면 계속 씀 (영구 캐시) · AI에 50개씩 묶어서 요청"""
     c = pcache("kname")
+    try:                                         # 기본 이름표 (저장소의 kn_base.json) — AI 한도와 무관하게 바로 표시
+        for t, v in json.loads((ROOT / "kn_base.json").read_text(encoding="utf-8")).items():
+            if v and not c.get(t):
+                c[t] = v
+    except Exception as e:
+        log.warning("kn_base.json 읽기 실패: %s", e)
     names = {}
     for t, n in rows:
         if n and not names.get(t):
