@@ -20,10 +20,12 @@ input,select{flex:1;min-width:0;background:var(--panel);border:1px solid var(--l
 select{flex:0 0 auto;max-width:46%}
 .chips{display:flex;gap:6px;overflow-x:auto;margin-top:8px;padding-bottom:2px;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
+.tkr{font-size:.72em;font-weight:600;color:var(--muted);letter-spacing:.02em}
 .hot{background:var(--panel);border:1px solid #5a2b33;border-radius:12px;padding:8px 12px;margin-bottom:10px}
 .sqc.fire{border-color:#5a2b33}.sqc.warm{border-color:#5a4a2b}
 .hot .hh{font-weight:800;font-size:13.5px;margin-bottom:4px}.hot .hh small{font-weight:400;color:var(--muted);font-size:10.5px;margin-left:4px}
-.hot .hr{display:grid;grid-template-columns:58px 1fr auto 62px;gap:6px;align-items:center;padding:6px 0;border-top:1px dashed var(--line);font-size:12.5px;cursor:pointer}
+.hot .hr{display:grid;grid-template-columns:minmax(58px,max-content) 1fr auto 62px;gap:6px;align-items:center;padding:6px 0;border-top:1px dashed var(--line);font-size:12.5px;cursor:pointer}
+.hot .hr b{white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}
 .hot .hr span{color:var(--muted);font-size:11px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .hot .hr em{font-style:normal;font-family:var(--mono)}.hot .hr i{font-style:normal;font-family:var(--mono);text-align:right;font-weight:700}
 .chip{flex:0 0 auto;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:5px 10px;font-size:12px;cursor:pointer}
@@ -246,7 +248,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
   <div class="sub" id="sub"></div>
   <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="surge">🚀 급등</span><span class="tab" data-v="jb">🎯 종배</span><span class="tab" data-v="pred">🔮 예측</span><span class="tab" data-v="cal">📅 일정</span><span class="tab" data-v="sq">🩳 숏스퀴즈</span></div>
   <div class="controls" id="ctl">
-    <input id="q" placeholder="티커·회사명 검색" autocomplete="off">
+    <input id="q" placeholder="티커·회사명·한글명 검색" autocomplete="off">
     <select id="sort">
       <option value="total">통합점수순</option>
       <option value="chg">오늘 등락률순 (급등주 먼저)</option>
@@ -271,6 +273,8 @@ const DATA = /*__DATA__*/null;
 const FILTERS = ["⭐관심","🔥오늘 급등","과매도","신저가","장중 반등","거래량 폭증","VWAP 위","상장 유지","현금 조달","물량 출회","병합","매집 의심","소형 유통","공모 준비","ATM·공모","공시 지연"];
 const keysOf = it => (it.snap && it.snap.keys) || [];
 const matches = (it, f) => f === "⭐관심" ? it.watch : f === "🔥오늘 급등" ? ((it.snap && it.snap.chg) || it.chg || 0) >= 20 : (it.tags.some(t => t.name === f) || keysOf(it).includes(f));
+const KO = t => (DATA && DATA.kn && DATA.kn[t]) || "";
+const TK = t => KO(t) ? `${esc(KO(t))} <small class="tkr">(${esc(t)})</small>` : esc(t);
 const pfmt = v => v == null ? "-" : (v < 1 ? v.toFixed(4) : v.toFixed(2));
 function spark(s, sn){
   if (!s || !s.p || s.p.length < 3) return '<div class="note">장중 1분봉 데이터 없음 (장 시작 전이거나 거래 없음)</div>';
@@ -361,7 +365,7 @@ function card(it, i){
   return `<article class="card" id="c-${esc(it.t)}">
     <div class="top" onclick="this.parentNode.classList.toggle('open')">
       <div class="rank ${i<3?'r'+(i+1):''}">${i+1}</div>
-      <div><div class="tk">${esc(it.t)}${it.watch ? '<span class="watch">⭐</span>' : ''}</div><div class="nm">${esc(it.name)}</div><div class="px">${usd(it.price)} ${chg}</div></div>
+      <div><div class="tk">${TK(it.t)}${it.watch ? '<span class="watch">⭐</span>' : ''}</div><div class="nm">${esc(it.name)}</div><div class="px">${usd(it.price)} ${chg}</div></div>
       <div class="score"><b>${it.total.toFixed(0)}</b><small>통합점수</small></div>
     </div>
     <div class="meta">
@@ -407,7 +411,7 @@ function renderHot(){
   const rows = DATA.items.filter(it => chgOf(it) >= 15).sort((a, b) => chgOf(b) - chgOf(a)).slice(0, 10);
   if (!rows.length){ box.innerHTML = ""; return; }
   box.innerHTML = `<div class="hot"><div class="hh">🔥 지금 급등 중 <small>오늘 +15% 이상 · ${esc(DATA.updated)} 기준 · 누르면 상세</small></div>
-    ${rows.map(it => `<div class="hr" onclick="openCard('${esc(it.t)}')"><b>${esc(it.t)}</b><span>${esc((it.name || "").slice(0, 22))}</span><em>${usd(it.price)}</em><i class="up">+${chgOf(it).toFixed(1)}%</i></div>`).join("")}</div>`;
+    ${rows.map(it => `<div class="hr" onclick="openCard('${esc(it.t)}')"><b>${esc(KO(it.t) || it.t)}</b><span>${KO(it.t) ? esc(it.t) + " · " : ""}${esc((it.name || "").slice(0, 22))}</span><em>${usd(it.price)}</em><i class="up">+${chgOf(it).toFixed(1)}%</i></div>`).join("")}</div>`;
 }
 let TAB = "all";   // 처음엔 기존 워치리스트 화면
 const kp = (label, v, sub, cls) => `<div><small>${label}</small><b class="${cls || ''}">${v}</b>${sub ? `<em>${sub}</em>` : ""}</div>`;
@@ -415,7 +419,7 @@ const scn = lines => `<div class="scn">${lines.map(l => `<div><b class="s-${esc(
 const news = ns => !ns || !ns.length ? "" : `<div class="nws">${ns.map(n => `<a href="${esc(n.link)}" target="_blank" rel="noopener"><i class="s-${esc(n.s)}">${esc(n.s)}</i>${esc(n.ko || n.title)}<small>${esc(n.pub)} · ${esc(n.when)}${n.dilute ? " · ⚠️ 희석 관련" : ""}</small></a>`).join("")}</div>`;
 const chipsOf = c => `<div class="chipsm">${c.drivers.map(d => `<span>${esc(d)}</span>`).join("")}${c.risks.map(r => `<span class="rk">⚠ ${esc(r)}</span>`).join("")}</div>`;
 const head = (c, i, sub) => `<div class="ch"><div class="rank ${i<3?'r'+(i+1):''}">${i+1}</div>
-  <div><div class="tk">${esc(c.t)}</div><div class="nm">${esc(c.name)}</div><span class="ty">${esc(c.type)}</span></div>
+  <div><div class="tk">${TK(c.t)}</div><div class="nm">${esc(c.name)}</div><span class="ty">${esc(c.type)}</span></div>
   <div class="cs"><b>${c.score}</b><small>${sub}</small></div></div>`;
 function aiOf(t){
   const it = DATA.items.find(x => x.t === t);
@@ -562,7 +566,7 @@ function render(){
       <div class="seg">${[["sure", `🎯 확실 후보 ${z.cands.filter(c => c.sure).length}`], ["all", `전체 ${z.cands.length}`]].map(([k, l]) => `<span class="${(window.PS || "sure") === k ? 'on' : ''}" onclick="PS='${k}';render()">${l}</span>`).join("")}</div>`;
     const shown = (window.PS || "sure") === "sure" ? z.cands.filter(c => c.sure) : z.cands;
     if (!shown.length) h += '<div class="empty">오늘은 확실 후보가 없어요 — 억지로 고르지 않아요. "전체"에서 참고 순위를 볼 수 있어요.</div>';
-    h += shown.map((c, i) => `<div class="pc" id="pc-${esc(c.t)}"><div class="h" onclick="pcToggle('${esc(c.t)}')" style="cursor:pointer"><div><b>${i + 1}. ${esc(c.t)}</b><small>${esc((c.name || "").slice(0, 26))}</small></div>
+    h += shown.map((c, i) => `<div class="pc" id="pc-${esc(c.t)}"><div class="h" onclick="pcToggle('${esc(c.t)}')" style="cursor:pointer"><div><b>${i + 1}. ${TK(c.t)}</b><small>${esc((c.name || "").slice(0, 26))}</small></div>
         <span class="tg ${c.sure ? 't-grn' : c.risk && c.risk.length ? 't-red' : ''}" style="font-size:11px">${c.sure ? "🎯 " : ""}판별 ${c.score}점 · ${c.prob != null ? "검증 " + c.prob + "%" + (z.base ? ` (평균 ${(+z.base).toFixed(0)}%)` : "") : "확률 미제시"}</span></div>
       <div class="g"><div>현재가<b>${pfmt(c.px)}</b>${krw(c.px)} <span class="${c.chg >= 0 ? 'up' : 'dn'}">${c.chg >= 0 ? "+" : ""}${c.chg}%</span></div>
         <div>조건부 고점<b class="up">${pfmt(c.peak)}</b>여력 +${c.up}%</div><div>조건부 예상일<b>${esc(c.day.slice(5))}</b>미국</div></div>
@@ -570,7 +574,7 @@ function render(){
     const L = (P.ledger || []).filter(e => String(e.h) === PH), st = (P.ledger_stat || {})[PH];
     h += `<div style="font-weight:800;margin:16px 0 6px">${lab[PH]} 이내 · 고정된 예측과 실제 결과</div>
       <div class="mut" style="font-size:11.5px;margin-bottom:6px;line-height:1.6">${st && st.n ? `기간 끝난 예측 <b style="color:var(--text)">${st.n}개 중 ${st.k}개 적중 (${st.rate}%)</b> · 95% ${st.lo}~${st.hi}%${st.sure ? ` · 🎯 확실 후보만 <b style="color:var(--text)">${st.sure.rate}%</b> (${st.sure.k}/${st.sure.n})` : ""}` : "아직 기간(" + lab[PH] + ")이 다 지난 예측이 없어서 적중률은 계산 전이에요."}${st && st.early && st.early.n ? `<br>진행 중 ${st.early.n}개 — 그중 <b style="color:var(--good)">${st.early.k}개는 벌써 목표 도달</b> (나머지는 기간이 끝나야 성공·실패가 정해져요)` : ""}</div>`;
-    h += L.slice(0, 40).map(e => `<div class="pc"><div class="h"><div><b>${e.sure ? "🎯 " : ""}${esc(e.t)}</b><small>${esc(e.asof)} 기준 · ${e.rank}위</small></div>
+    h += L.slice(0, 40).map(e => `<div class="pc"><div class="h"><div><b>${e.sure ? "🎯 " : ""}${TK(e.t)}</b><small>${esc(e.asof)} 기준 · ${e.rank}위</small></div>
         <span class="rs ${e.res === '적중' ? '적중' : e.res === '미적중' ? '미적중' : '관찰'}">${e.res === '적중' ? '급등 적중' : e.res === '미적중' ? '미적중' : e.res ? `관찰 ${e.days || 0}/${e.h}일` : '내일부터 채점'}</span></div>
       <div class="g"><div>기준가<b>${pfmt(e.ref)}</b></div><div>예상 고점<b>${pfmt(e.peak)}</b>${esc(e.day.slice(5))}</div>
         <div>실제 고점<b class="${e.act_peak >= e.ref * (1 + e.th / 100) ? 'up' : ''}">${e.act_peak ? pfmt(e.act_peak) : "-"}</b>${e.act_peak ? (((e.act_peak / e.ref - 1) * 100 >= 0 ? "+" : "") + ((e.act_peak / e.ref - 1) * 100).toFixed(1) + "% · " + esc((e.act_day || "").slice(5))) : ""}</div></div></div>`).join("");
@@ -596,7 +600,7 @@ function render(){
     let h = `<div class="intro">📅 <b>예정 호재·이벤트</b> — 실적 발표일, FDA 심사일(PDUFA, 뉴스에서 찾은 것), $1 회복 기한, 분기보고 마감이에요. 기한이 다가오면 부양성 호재나 병합·증자 발표가 몰리는 경향이 있어요. 누르면 종목 상세로 가요.</div>`, last = "";
     for (const e of xs){
       if (e.label !== last){ h += `<div class="cday">${esc(e.label)}<span>${e.d === 0 ? "오늘" : "D-" + e.d}</span></div>`; last = e.label; }
-      h += `<div class="crow" onclick="openCard('${esc(e.t)}')"><b>${esc(e.t)}</b><div><em>${esc(e.ev)}</em><small>${esc(e.name)} · ${esc(e.note)}</small></div></div>`;
+      h += `<div class="crow" onclick="openCard('${esc(e.t)}')"><b>${TK(e.t)}</b><div><em>${esc(e.ev)}</em><small>${esc(e.name)} · ${esc(e.note)}</small></div></div>`;
     }
     $("#list").innerHTML = xs.length ? h : h + '<div class="empty">14일 안에 확인된 일정이 없어요</div>';
     return;
@@ -607,7 +611,7 @@ function render(){
     $("#sub").textContent = `${DATA.updated} 업데이트 · 숏스퀴즈 점수순`;
     $("#list").innerHTML = `<div class="intro">🩳 <b>숏스퀴즈 후보</b> — 공매도가 많이 쌓였고(유통 대비 %), 빌린 주식 이자가 비싸고, 유통 물량이 적은 종목이에요. 이런 종목은 <b>거래량이 터지며 오르면</b> 공매도 세력이 손실을 줄이려 되사면서(숏커버) 급등이 커질 수 있어요.<br><span style="color:var(--muted)">공매도 수치는 거래소 보고 기준(2주마다), 대차 이자는 IBKR 기준이에요. 🔥점화 → ⚡예열 → ⏳대기 순.</span></div>`
       + (xs.map((c, i) => `<article class="cand sqc ${esc(c.lv)}"><div class="ch"><div class="rank ${i < 3 ? 'r' + (i + 1) : ''}">${i + 1}</div>
-        <div><div class="tk">${esc(c.t)}</div><div class="nm">${esc((c.name || "").slice(0, 28))}</div><span class="ty">${esc(c.st)}</span></div>
+        <div><div class="tk">${TK(c.t)}</div><div class="nm">${esc((c.name || "").slice(0, 28))}</div><span class="ty">${esc(c.st)}</span></div>
         <div class="cs"><b>${c.score}</b><small>스퀴즈 점수</small></div></div>
         <div class="kp">
           ${kp("공매도 / 유통", c.si != null ? c.si.toFixed(1) + "%" : "-", `${sh(c.short)}주${c.short_prev ? ` · 전월 ${sh(c.short_prev)}` : ""}${c.si_date ? " · " + esc(c.si_date) : ""}`, c.si >= 20 ? "up" : "")}
@@ -634,7 +638,7 @@ function render(){
     return;
   }
   const q = $("#q").value.trim().toLowerCase(), sort = $("#sort").value;
-  let xs = DATA.items.filter(it => (!q || it.t.toLowerCase().includes(q) || (it.name||"").toLowerCase().includes(q))
+  let xs = DATA.items.filter(it => (!q || it.t.toLowerCase().includes(q) || (it.name||"").toLowerCase().includes(q) || KO(it.t).includes(q))
     && [...on].every(f => matches(it, f)));
   const sn = it => it.snap || {};
   const key = {
