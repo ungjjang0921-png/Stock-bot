@@ -1078,7 +1078,8 @@ def trade_plan(it: dict, df: pd.DataFrame | None) -> dict | None:
     c, h, l = df["Close"], df["High"], df["Low"]
     prev_c = float(c.iloc[-2]) if sn.get("sdate") and str(df.index[-1].date()) == sn["sdate"] else float(c.iloc[-1])
     tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
-    atr = float(tr.iloc[-14:].mean()) / p
+    atr = float(tr.iloc[-14:].median()) / p        # 중앙값: 하루 폭등·폭락 한 번에 휘둘리지 않게
+    aa = min(atr, 0.30)                              # 계산용 변동폭 상한 30%
     # 지지선 후보 (현재가 아래)
     sup = {"VWAP": sn.get("vwap"), "전일 종가": prev_c, "20일선": float(c.iloc[-20:].mean()),
            "5일 저점": float(l.iloc[-5:].min()), "20일 저점": float(l.iloc[-20:].min()),
@@ -1097,14 +1098,18 @@ def trade_plan(it: dict, df: pd.DataFrame | None) -> dict | None:
     if merged:
         e1, e1k = min(merged[0][0] * 1.01, p * 0.995), merged[0][1]
     else:
-        e1, e1k = p * (1 - max(0.03, atr * 0.5)), "변동폭 절반 눌림"
-    e2, e2k = (merged[1][0] * 1.01, merged[1][1]) if len(merged) > 1 else (e1 * (1 - max(0.05, atr)), "추가 눌림")
-    floor = merged[1][0] if len(merged) > 1 else (merged[0][0] if merged else e2)
+        e1, e1k = p * (1 - max(0.03, aa * 0.5)), "변동폭 절반 눌림"
+    if len(merged) > 1 and merged[1][0] * 1.01 >= e1 * 0.80:
+        e2, e2k = merged[1][0] * 1.01, merged[1][1]
+    else:                                            # 2차 지지선이 너무 멀면 1차에서 5~15% 아래
+        e2, e2k = e1 * (1 - min(max(0.05, aa * 0.5), 0.15)), "추가 눌림"
+    e2 = min(e2, e1 * 0.97)
+    floor = merged[1][0] if len(merged) > 1 and merged[1][0] < e2 else e2
     stop = min(floor * 0.97, e2 * 0.97)
-    stop = max(min(stop, e1 * 0.93), e1 * 0.80)    # 손절폭 7~20%
+    stop = min(max(stop, e1 * 0.75), e2 * 0.97)      # 손절은 항상 2차 매수가 아래, 1차 대비 최대 -25%
     avg = (e1 + e2) / 2
     tg = [x for x in sorted(set(res) | ({it["target"]} if it.get("target") else set())) if x > avg * 1.08]
-    t1 = tg[0] if tg else avg * (1 + max(0.15, atr * 2))
+    t1 = tg[0] if tg else avg * (1 + min(max(0.15, aa * 2), 0.60))
     t2 = next((x for x in tg if x > t1 * 1.10), t1 * 1.25)
     rr = (t1 - avg) / (avg - stop) if avg > stop else None
     # 판단

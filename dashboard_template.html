@@ -469,7 +469,7 @@ function tradeBlock(it){
       <div><small>① 1차 눌림 매수</small><b>${usd(t.e1)}</b><em>${esc(t.e1k)} · ${sp(t.e1)}</em></div>
       <div><small>② 2차 분할 매수</small><b>${usd(t.e2)}</b><em>${esc(t.e2k)} · ${sp(t.e2)}</em></div>
       <div><small>🚀 돌파 매수</small><b>${t.brk ? usd(t.brk) : "-"}</b><em>${t.brk ? usd(t.brk_lv) + " 뚫고 거래량 붙을 때" : "위 매물대 없음"}</em></div>
-      <div><small>🛑 손절</small><b class="dn">${usd(t.stop)}</b><em>평단 대비 -${((1 - t.stop / t.avg) * 100).toFixed(0)}%</em></div>
+      <div><small>🛑 손절</small><b class="dn">${usd(t.stop)}</b><em>평단 대비 ${((t.stop / t.avg - 1) * 100).toFixed(0)}%</em></div>
       <div><small>🎯 1차 목표 (절반 익절)</small><b class="up">${usd(t.t1)}</b><em>평단 대비 +${((t.t1 / t.avg - 1) * 100).toFixed(0)}%</em></div>
       <div><small>🎯 2차 목표</small><b class="up">${usd(t.t2)}</b><em>평단 대비 +${((t.t2 / t.avg - 1) * 100).toFixed(0)}%</em></div>
     </div>
