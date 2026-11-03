@@ -20,7 +20,11 @@ input,select{flex:1;min-width:0;background:var(--panel);border:1px solid var(--l
 select{flex:0 0 auto;max-width:46%}
 .chips{display:flex;gap:6px;overflow-x:auto;margin-top:8px;padding-bottom:2px;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
-.tkr{font-size:.72em;font-weight:600;color:var(--muted);letter-spacing:.02em}
+.rvb{display:grid;grid-template-columns:minmax(0,1.3fr) 1fr 36px;gap:8px;align-items:center;font-size:11.5px;padding:3px 0}
+.rvb i{height:6px;border-radius:3px;background:var(--panel2);overflow:hidden}.rvb i b{display:block;height:100%;background:var(--bad)}
+.rvb em{font-style:normal;color:var(--muted);text-align:right}
+.rvp{font-size:11.5px;color:var(--muted);margin-top:6px}.rvp b{font-family:var(--mono)}
+.rvw{margin:6px 0 0;padding-left:16px;font-size:12px;line-height:1.6}
 .hot{background:var(--panel);border:1px solid #5a2b33;border-radius:12px;padding:8px 12px;margin-bottom:10px}
 .sqc.fire{border-color:#5a2b33}.sqc.warm{border-color:#5a4a2b}
 .hot .hh{font-weight:800;font-size:13.5px;margin-bottom:4px}.hot .hh small{font-weight:400;color:var(--muted);font-size:10.5px;margin-left:4px}
@@ -248,7 +252,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
   <div class="sub" id="sub"></div>
   <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="surge">🚀 급등</span><span class="tab" data-v="jb">🎯 종배</span><span class="tab" data-v="pred">🔮 예측</span><span class="tab" data-v="cal">📅 일정</span><span class="tab" data-v="sq">🩳 숏스퀴즈</span></div>
   <div class="controls" id="ctl">
-    <input id="q" placeholder="티커·회사명·한글명 검색" autocomplete="off">
+    <input id="q" placeholder="티커·회사명 검색" autocomplete="off">
     <select id="sort">
       <option value="total">통합점수순</option>
       <option value="chg">오늘 등락률순 (급등주 먼저)</option>
@@ -273,8 +277,7 @@ const DATA = /*__DATA__*/null;
 const FILTERS = ["⭐관심","🔥오늘 급등","과매도","신저가","장중 반등","거래량 폭증","VWAP 위","상장 유지","현금 조달","물량 출회","병합","매집 의심","소형 유통","공모 준비","ATM·공모","공시 지연"];
 const keysOf = it => (it.snap && it.snap.keys) || [];
 const matches = (it, f) => f === "⭐관심" ? it.watch : f === "🔥오늘 급등" ? ((it.snap && it.snap.chg) || it.chg || 0) >= 20 : (it.tags.some(t => t.name === f) || keysOf(it).includes(f));
-const KO = t => (DATA && DATA.kn && DATA.kn[t]) || "";
-const TK = t => KO(t) ? `${esc(KO(t))} <small class="tkr">(${esc(t)})</small>` : esc(t);
+const TK = t => esc(t);
 const pfmt = v => v == null ? "-" : (v < 1 ? v.toFixed(4) : v.toFixed(2));
 function spark(s, sn){
   if (!s || !s.p || s.p.length < 3) return '<div class="note">장중 1분봉 데이터 없음 (장 시작 전이거나 거래 없음)</div>';
@@ -411,7 +414,7 @@ function renderHot(){
   const rows = DATA.items.filter(it => chgOf(it) >= 15).sort((a, b) => chgOf(b) - chgOf(a)).slice(0, 10);
   if (!rows.length){ box.innerHTML = ""; return; }
   box.innerHTML = `<div class="hot"><div class="hh">🔥 지금 급등 중 <small>오늘 +15% 이상 · ${esc(DATA.updated)} 기준 · 누르면 상세</small></div>
-    ${rows.map(it => `<div class="hr" onclick="openCard('${esc(it.t)}')"><b>${esc(KO(it.t) || it.t)}</b><span>${KO(it.t) ? esc(it.t) + " · " : ""}${esc((it.name || "").slice(0, 22))}</span><em>${usd(it.price)}</em><i class="up">+${chgOf(it).toFixed(1)}%</i></div>`).join("")}</div>`;
+    ${rows.map(it => `<div class="hr" onclick="openCard('${esc(it.t)}')"><b>${esc(it.t)}</b><span>${esc((it.name || "").slice(0, 22))}</span><em>${usd(it.price)}</em><i class="up">+${chgOf(it).toFixed(1)}%</i></div>`).join("")}</div>`;
 }
 let TAB = "all";   // 처음엔 기존 워치리스트 화면
 const kp = (label, v, sub, cls) => `<div><small>${label}</small><b class="${cls || ''}">${v}</b>${sub ? `<em>${sub}</em>` : ""}</div>`;
@@ -579,6 +582,17 @@ function render(){
       <div class="g"><div>기준가<b>${pfmt(e.ref)}</b></div><div>예상 고점<b>${pfmt(e.peak)}</b>${esc(e.day.slice(5))}</div>
         <div>실제 고점<b class="${e.act_peak >= e.ref * (1 + e.th / 100) ? 'up' : ''}">${e.act_peak ? pfmt(e.act_peak) : "-"}</b>${e.act_peak ? (((e.act_peak / e.ref - 1) * 100 >= 0 ? "+" : "") + ((e.act_peak / e.ref - 1) * 100).toFixed(1) + "% · " + esc((e.act_day || "").slice(5))) : ""}</div></div></div>`).join("");
     const F = (P.fail || {})[PH];
+    const RV = (P.review || {})[PH];
+    h += `<div style="font-weight:800;margin:16px 0 6px">📝 실패 복기 · 어떤 종목이 왜 틀렸나</div>`;
+    if (!RV || !RV.rows.length) h += `<div class="mut" style="font-size:12px">아직 기간(${lab[PH]})이 끝난 실패 예측이 없어요. 끝나는 대로 한 종목씩 복기해요.</div>`;
+    else {
+      const mx = Math.max(...RV.top.map(x => x[1]), 1);
+      h += `<div class="pc"><div style="font-size:12px;margin-bottom:6px">기간 끝난 예측 <b>${RV.n_hit + RV.n_miss}개</b> 중 실패 <b class="dn">${RV.n_miss}개</b> · 실패 이유 순위</div>
+        ${RV.top.map(([k, n]) => `<div class="rvb"><span>${esc(k)}</span><i><b style="width:${Math.round(n / mx * 100)}%"></b></i><em>${n}건</em></div>`).join("")}</div>`;
+      h += RV.rows.slice(0, 25).map(r => `<div class="pc rv"><div class="h"><div><b>${r.sure ? "🎯 " : ""}${TK(r.t)}</b><small>${esc(r.asof)} 예측 · ${r.rank}위 · 기준가 ${pfmt(r.ref)}</small></div><span class="rs 미적중">미적중</span></div>
+        ${r.hi != null ? `<div class="rvp">기간 최고 <b class="${r.hi >= 0 ? "up" : "dn"}">${r.hi >= 0 ? "+" : ""}${r.hi}%</b>${r.pk_day ? ` (${r.pk_day}일째)` : ""} · 최저 <b class="dn">${r.lo}%</b> · 마지막 <b class="${r.end >= 0 ? "up" : "dn"}">${r.end >= 0 ? "+" : ""}${r.end}%</b> · 목표 +${r.th}%</div>` : ""}
+        <ul class="rvw">${r.why.map(w => `<li>${esc(w)}</li>`).join("")}</ul></div>`).join("");
+    }
     h += `<div style="font-weight:800;margin:16px 0 6px">❌ 실패 분석 · 틀린 예측의 공통점</div>`;
     if (!F) h += `<div class="mut" style="font-size:12px">아직 채점 끝난 예측이 없어요. 기간이 지나면 자동으로 분석해요.</div>`;
     else {
@@ -638,7 +652,7 @@ function render(){
     return;
   }
   const q = $("#q").value.trim().toLowerCase(), sort = $("#sort").value;
-  let xs = DATA.items.filter(it => (!q || it.t.toLowerCase().includes(q) || (it.name||"").toLowerCase().includes(q) || KO(it.t).includes(q))
+  let xs = DATA.items.filter(it => (!q || it.t.toLowerCase().includes(q) || (it.name||"").toLowerCase().includes(q))
     && [...on].every(f => matches(it, f)));
   const sn = it => it.snap || {};
   const key = {

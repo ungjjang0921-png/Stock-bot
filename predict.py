@@ -10,6 +10,7 @@
 """
 
 import json
+import re
 import logging
 import math
 from datetime import date, timedelta
@@ -174,7 +175,7 @@ def _evaluate(ev, score, H, th, gcol, dcol, pk_med, dd_med, pk_pred=None):
 
 
 def run(prices: dict[str, pd.DataFrame], info: dict[str, dict], cutoff: date, log_path: Path,
-        fx: float | None, check=None) -> dict:
+        fx: float | None, check=None, filings: dict | None = None) -> dict:
     frames = []
     for t, df in prices.items():
         if df is None or len(df) < 80:
@@ -302,9 +303,11 @@ def run(prices: dict[str, pd.DataFrame], info: dict[str, dict], cutoff: date, lo
     out["ledger"] = ledger(out, prices, log_path)
     try:
         out["fail"] = failure_analysis(log_path, A)
+        out["review"] = review(log_path, A, prices, filings or {})
     except Exception as e:
         log.warning("실패 분석 오류: %s", e)
         out["fail"] = {}
+        out["review"] = {}
     return out
 
 
@@ -416,3 +419,89 @@ def ledger(out: dict, prices: dict, path: Path) -> list[dict]:
     out["ledger_stat"] = res
     show = sorted(book, key=lambda e: (e["asof"], -e["rank"]))      # 최근 기준일 먼저, 같은 날은 1위부터
     return [e for e in reversed(show)][:300]
+
+
+DIL_FORMS = {"424B5": "ATM·공모 설명서", "424B4": "공모가 확정", "424B3": "재판매 등록(물량)", "S-1": "증권신고서",
+             "S-1/A": "증권신고서 정정", "S-3": "Shelf 등록", "F-1": "증권신고서", "F-3": "Shelf 등록"}
+
+
+def _why_failed(e: dict, r, df, fs) -> tuple[list[str], dict]:
+    """미적중 한 건 → (이유 목록, 기간 중 실제 흐름)"""
+    why = []
+    rv = float(np.expm1(r["relvol"])) if r is not None else None
+    if r is not None:
+        if rv is not None and rv < 0.8:
+            why.append(f"거래량 부족 — 예측일 거래량이 평소의 {rv:.1f}배")
+        if r["ret20"] >= 0.5:
+            why.append(f"이미 급등 후 — 20일간 +{r['ret20'] * 100:.0f}% 오른 상태")
+        if r["dhigh"] >= -0.12:
+            why.append("6개월 고점 근처 — 위쪽 매물 부담")
+        if r["ret20"] <= -0.3 and r["ma20"] < -0.1:
+            why.append(f"하락 추세 — 20일간 {r['ret20'] * 100:.0f}%, 바닥 확인 전")
+        if r["rsi"] >= 0.7:
+            why.append(f"과열 — RSI {r['rsi'] * 100:.0f}")
+        if np.expm1(r["dvol"]) < 300_000:
+            why.append(f"거래대금 적음 — 하루 평균 ${np.expm1(r['dvol']) / 1e3:.0f}K")
+        if r["cp"] <= 0.25 and r["ret1"] < 0:
+            why.append("예측일 저가권 마감 — 매도세 우위")
+    path = {}
+    a = date.fromisoformat(e["asof"])
+    if df is not None:
+        win = df[[ts.date() > a for ts in df.index]].iloc[:e["h"]]
+        if len(win):
+            hi, lo, last = float(win["High"].max()), float(win["Low"].min()), float(win["Close"].iloc[-1])
+            pk = int(np.argmax(win["High"].values)) + 1
+            path = {"hi": round((hi / e["ref"] - 1) * 100, 1), "lo": round((lo / e["ref"] - 1) * 100, 1),
+                    "end": round((last / e["ref"] - 1) * 100, 1), "pk_day": pk}
+            if path["hi"] >= e["th"] * 0.6:
+                why.append(f"아까운 실패 — +{path['hi']:.0f}%까지 가고 목표 +{e['th']}% 미달")
+            elif path["hi"] < 5:
+                why.append("시작부터 힘 없음 — 기간 내 최고 +5% 미만")
+            if pk <= 2 and path["end"] < 0 and path["hi"] >= 10:
+                why.append(f"초반 +{path['hi']:.0f}% 찍고 밀림 — 바로 매도 물량")
+            if path["lo"] <= -25:
+                why.append(f"기간 중 {path['lo']:.0f}%까지 급락")
+    end = a + timedelta(days=int(e["h"] * 1.5) + 3)
+    for f in fs or []:
+        try:
+            d = date.fromisoformat(f["date"])
+        except Exception:
+            continue
+        if a < d <= end:
+            if f["form"] in DIL_FORMS:
+                why.insert(0, f"예측 후 {d.month}/{d.day} {DIL_FORMS[f['form']]} 공시 — 희석 물량")
+                break
+            if f["form"].startswith("8-K") and "3.02" in (f.get("items") or ""):
+                why.insert(0, f"예측 후 {d.month}/{d.day} 미등록 주식 발행 — 희석")
+                break
+    if not why:
+        why.append("뚜렷한 약점 없음 — 시장 흐름·운 요인")
+    return why, path
+
+
+def review(path: Path, A: pd.DataFrame, prices: dict, filings: dict) -> dict:
+    """기간 끝난 미적중 예측 하나하나 복기 + 실패 이유 순위"""
+    book = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+    out = {}
+    for H in HORIZONS:
+        done = [e for e in book if e["h"] == H and e.get("done") and e["res"] == "미적중"]
+        done.sort(key=lambda e: (e["asof"], -e.get("score", 0)), reverse=True)
+        rows, cnt = [], {}
+        for e in done[:60]:
+            k = (date.fromisoformat(e["asof"]), e["t"])
+            r = None
+            if k in A.index:
+                r = A.loc[k]
+                if isinstance(r, pd.DataFrame):
+                    r = r.iloc[0]
+            why, pth = _why_failed(e, r, prices.get(e["t"]), filings.get(e["t"]))
+            for w in why:
+                key = w.split(" — ")[0]
+                key = re.sub(r"\d+/\d+ ", "", key)
+                cnt[key] = cnt.get(key, 0) + 1
+            rows.append({"t": e["t"], "name": e.get("name", ""), "asof": e["asof"], "rank": e.get("rank"),
+                         "sure": e.get("sure"), "ref": e["ref"], "th": e["th"], "why": why, **pth})
+        n_hit = sum(1 for e in book if e["h"] == H and e.get("done") and e["res"] == "적중")
+        out[str(H)] = {"rows": rows[:40], "n_miss": len(done), "n_hit": n_hit,
+                       "top": sorted(cnt.items(), key=lambda x: -x[1])[:6]}
+    return out

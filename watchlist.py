@@ -2317,59 +2317,6 @@ def build_squeeze(items: list) -> list[dict]:
 SQUEEZE: list = []
 
 
-# ───────────────── 7-3. 한글 종목명 (토스증권식 발음 표기) ─────────────────
-KN_SUFFIX = [" Inc.", " Inc", " Corp.", " Corp", " Corporation", " Holdings", " Holding", " Ltd.", " Ltd", " plc",
-             " PLC", " Co.", " Class A", " Class B", " Common Stock", " Ordinary Shares", " American Depositary Shares",
-             " ADS", " N.V.", " S.A.", " Limited", " Group", " Company", ",", " LLC", " L.P."]
-
-
-def _short_name(n: str) -> str:
-    n = n or ""
-    for x in KN_SUFFIX:
-        n = n.replace(x, "")
-    return re.sub(r"\s+", " ", n).strip(" .,-")
-
-
-def ko_names(rows: list[tuple[str, str]]) -> dict:
-    """[(티커, 영문명)] → {티커: 한글명}. 한 번 정하면 계속 씀 (영구 캐시) · AI에 50개씩 묶어서 요청"""
-    c = pcache("kname")
-    try:                                         # 기본 이름표 (저장소의 kn_base.json) — AI 한도와 무관하게 바로 표시
-        for t, v in json.loads((ROOT / "kn_base.json").read_text(encoding="utf-8")).items():
-            if v and not c.get(t):
-                c[t] = v
-    except Exception as e:
-        log.warning("kn_base.json 읽기 실패: %s", e)
-    names = {}
-    for t, n in rows:
-        if n and not names.get(t):
-            names[t] = n
-    miss = [(t, _short_name(n)) for t, n in names.items() if t not in c]
-    for i in range(0, len(miss), 50):
-        if time_left() < 300 or not (ANTHROPIC_KEY or GROQ_KEY):
-            break
-        chunk = miss[i:i + 50]
-        raw = llm("다음 미국 상장사 이름을 토스증권 앱처럼 한국어 발음 표기로 바꿔라. 규칙: 법인 표기(Inc·Corp 등)는 빼고, "
-                  "영어 단어도 번역하지 말고 소리 나는 대로 적어라 (예: Nuburu→누부루, Netcapital→넷캐피탈, "
-                  "PicoCELA→피코세라, Inovio Pharmaceuticals→이노비오 파마슈티컬스, Smart Logistics Global→스마트 로지스틱스 글로벌). "
-                  "약자(대문자 2~4글자)는 알파벳 그대로 둬도 된다. 반드시 JSON 객체 하나만 출력: {\"티커\": \"한글명\"}\n\n"
-                  + "\n".join(f"{t}: {n}" for t, n in chunk), 1500)
-        m = re.search(r"\{.*\}", raw or "", re.S)
-        try:
-            got = json.loads(m.group(0)) if m else {}
-        except Exception:
-            got = {}
-        for t, _ in chunk:
-            v = str(got.get(t) or "").strip()
-            if v and HANGUL.search(v) and len(v) <= 30:
-                c[t] = v
-            elif got:
-                c[t] = ""                      # 한글로 못 바꾼 이름은 다시 묻지 않음 (티커로 표시)
-    return {t: c[t] for t, _ in rows if c.get(t)}
-
-
-KN: dict = {}
-
-
 # ───────────────── 8. 출력 ─────────────────
 def _clean(o):
     if isinstance(o, float):
@@ -2391,7 +2338,7 @@ def write_page(items: list[dict], surge=None, jbc=None) -> None:
     tpl = (ROOT / "dashboard_template.html").read_text(encoding="utf-8")
     payload = _clean({"updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"), "items": items,
                       "forward": FORWARD_DAYS, "surge": surge or [], "jbc": jbc or [],
-                      "cal": CALENDAR, "sq": SQUEEZE, "pred": PRED, "kn": KN,
+                      "cal": CALENDAR, "sq": SQUEEZE, "pred": PRED,
                       "rules": {"reg": int(SURGE_REG * 100), "pre": int(SURGE_PRE * 100), "jb": int(JB_HIT * 100)}})
     data = json.dumps(payload, ensure_ascii=False, default=lambda o: None).replace("</", "<\\/")
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -2472,7 +2419,7 @@ def main():
                               "risk": [t["name"] for t in it["tags"] if t["name"] in RISKY]
                               + (["희석 위험 높음"] if it["t"] in dil_hi else [])} for it in items}
             PRED = predmod.run(PRICES, info, target_session(),
-                               OUT.parent / "pred_log.json", fx, check=distress_news)
+                               OUT.parent / "pred_log.json", fx, check=distress_news, filings=FS_ALL)
             log.info("예측 모델 %.0f초 · 기간 %s", time.time() - t_p, list((PRED or {}).get("horizons", {})))
             fa = (PRED or {}).get("fail") or {}
             ready = {h: v for h, v in fa.items() if v.get("ready")}
@@ -2486,16 +2433,7 @@ def main():
                 PRED["fail_ai"] = c[key]
         except Exception as e:
             log.exception("예측 실패: %s", e)
-    global SQUEEZE, KN
-    try:
-        rows = [(it["t"], it["name"]) for it in items]
-        for z in ((PRED or {}).get("horizons") or {}).values():
-            rows += [(c["t"], c.get("name", "")) for c in z.get("cands", [])]
-        rows += [(e["t"], e.get("name", "")) for e in ((PRED or {}).get("ledger") or [])]
-        KN = ko_names(rows)
-        pcache_save()
-    except Exception as e:
-        log.exception("한글 종목명 실패: %s", e)
+    global SQUEEZE
     try:
         SQUEEZE = build_squeeze(items)
     except Exception as e:
