@@ -20,6 +20,16 @@ input,select{flex:1;min-width:0;background:var(--panel);border:1px solid var(--l
 select{flex:0 0 auto;max-width:46%}
 .chips{display:flex;gap:6px;overflow-x:auto;margin-top:8px;padding-bottom:2px;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
+.cal{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px}
+.cal .ch{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.cal .ch span{padding:2px 14px;font-size:20px;cursor:pointer;color:var(--accent)}.cal .ch b{font-size:14px}
+.cal .cg{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center}
+.cal .cg em{font-style:normal;font-size:10.5px;color:var(--muted)}
+.cal .cg span{border-radius:8px;padding:5px 0 3px;min-height:38px}
+.cal .cg span b{display:block;font-size:12.5px;font-weight:600}.cal .cg span i{display:block;font-style:normal;font-size:9.5px;color:var(--muted)}
+.cal .cg .no b{color:#4b5563;font-weight:400}
+.cal .cg .has{background:var(--panel2);cursor:pointer;box-shadow:inset 0 -2px 0 var(--accent)}
+.cal .cg .has.on{background:var(--accent);color:#04121c}.cal .cg .has.on i{color:#04121c}
 .rvb{display:grid;grid-template-columns:minmax(0,1.3fr) 1fr 36px;gap:8px;align-items:center;font-size:11.5px;padding:3px 0}
 .rvb i{height:6px;border-radius:3px;background:var(--panel2);overflow:hidden}.rvb i b{display:block;height:100%;background:var(--bad)}
 .rvb em{font-style:normal;color:var(--muted);text-align:right}
@@ -577,10 +587,39 @@ function render(){
     const L = (P.ledger || []).filter(e => String(e.h) === PH), st = (P.ledger_stat || {})[PH];
     h += `<div style="font-weight:800;margin:16px 0 6px">${lab[PH]} 이내 · 고정된 예측과 실제 결과</div>
       <div class="mut" style="font-size:11.5px;margin-bottom:6px;line-height:1.6">${st && st.n ? `기간 끝난 예측 <b style="color:var(--text)">${st.n}개 중 ${st.k}개 적중 (${st.rate}%)</b> · 95% ${st.lo}~${st.hi}%${st.sure ? ` · 🎯 확실 후보만 <b style="color:var(--text)">${st.sure.rate}%</b> (${st.sure.k}/${st.sure.n})` : ""}` : "아직 기간(" + lab[PH] + ")이 다 지난 예측이 없어서 적중률은 계산 전이에요."}${st && st.early && st.early.n ? `<br>진행 중 ${st.early.n}개 — 그중 <b style="color:var(--good)">${st.early.k}개는 벌써 목표 도달</b> (나머지는 기간이 끝나야 성공·실패가 정해져요)` : ""}</div>`;
-    h += L.slice(0, 40).map(e => `<div class="pc"><div class="h"><div><b>${e.sure ? "🎯 " : ""}${TK(e.t)}</b><small>${esc(e.asof)} 기준 · ${e.rank}위</small></div>
+    // ── 📅 달력: 날짜를 누르면 그날 고정한 추천 종목과 결과
+    if (!window.CALTRY && location.protocol.startsWith("http")){
+      window.CALTRY = 1;
+      fetch("pred_log.json?" + Date.now()).then(r => r.ok ? r.json() : null)
+        .then(j => { if (Array.isArray(j)){ window.CALLOG = j; if (TAB === "pred") render(); } }).catch(() => {});
+    }
+    const LOG = (window.CALLOG || P.ledger || []).filter(e => String(e.h) === PH);
+    const byD = {};
+    LOG.forEach(e => { const d = byD[e.asof] = byD[e.asof] || {n: 0, k: 0, x: 0}; d.n++; if (e.res === "적중") d.k++; else if (e.res === "미적중") d.x++; });
+    const days = Object.keys(byD).sort();
+    if (!window.CALD || !byD[window.CALD]) window.CALD = days[days.length - 1];
+    if (!window.CALM) window.CALM = (window.CALD || P.asof || "").slice(0, 7);
+    const [cy, cm] = (window.CALM || "2026-01").split("-").map(Number);
+    const first = new Date(cy, cm - 1, 1).getDay(), nd = new Date(cy, cm, 0).getDate();
+    const mv = k => { const d = new Date(cy, cm - 1 + k, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+    let cells = "";
+    for (let i = 0; i < first; i++) cells += "<span></span>";
+    for (let d = 1; d <= nd; d++){
+      const key = `${window.CALM}-${String(d).padStart(2, "0")}`, x = byD[key];
+      cells += x ? `<span class="has ${key === window.CALD ? "on" : ""}" onclick="CALD='${key}';render();setTimeout(()=>document.getElementById('cald').scrollIntoView({block:'start'}),0)"><b>${d}</b><i>${x.k || x.x ? `<span style="color:var(--good)">${x.k}</span>/<span style="color:var(--bad)">${x.x}</span>` : `${x.n}개`}</i></span>`
+                 : `<span class="no"><b>${d}</b></span>`;
+    }
+    h += `<div style="font-weight:800;margin:16px 0 6px">📅 날짜별 추천 · ${lab[PH]} 이내</div>
+      <div class="cal"><div class="ch"><span onclick="CALM='${mv(-1)}';render()">‹</span><b>${cy}년 ${cm}월</b><span onclick="CALM='${mv(1)}';render()">›</span></div>
+        <div class="cg">${["일","월","화","수","목","금","토"].map(w => `<em>${w}</em>`).join("")}${cells}</div>
+        <div class="mut" style="font-size:10.5px;margin-top:6px">밑줄 있는 날 = 그날 미국 종가 기준으로 고정한 추천이 있는 날 · <span style="color:var(--good)">적중</span>/<span style="color:var(--bad)">실패</span> 수 (아직 진행 중이면 종목 수)</div></div>`;
+    const DL = LOG.filter(e => e.asof === window.CALD).sort((a, b) => a.rank - b.rank);
+    const dk = DL.filter(e => e.res === "적중").length, dx = DL.filter(e => e.res === "미적중").length;
+    h += `<div id="cald" class="mut" style="font-size:12px;margin:10px 0 6px"><b style="color:var(--text);font-size:13.5px">${esc(window.CALD || "-")} 추천 ${DL.length}종목</b> · 적중 <b class="up">${dk}</b> · 실패 <b class="dn">${dx}</b> · 진행 중 ${DL.length - dk - dx}</div>`;
+    h += DL.map(e => `<div class="pc"><div class="h"><div><b>${e.rank}. ${e.sure ? "🎯 " : ""}${TK(e.t)}</b><small>${esc((e.name || "").slice(0, 24))}</small></div>
         <span class="rs ${e.res === '적중' ? '적중' : e.res === '미적중' ? '미적중' : '관찰'}">${e.res === '적중' ? '급등 적중' : e.res === '미적중' ? '미적중' : e.res ? `관찰 ${e.days || 0}/${e.h}일` : '내일부터 채점'}</span></div>
-      <div class="g"><div>기준가<b>${pfmt(e.ref)}</b></div><div>예상 고점<b>${pfmt(e.peak)}</b>${esc(e.day.slice(5))}</div>
-        <div>실제 고점<b class="${e.act_peak >= e.ref * (1 + e.th / 100) ? 'up' : ''}">${e.act_peak ? pfmt(e.act_peak) : "-"}</b>${e.act_peak ? (((e.act_peak / e.ref - 1) * 100 >= 0 ? "+" : "") + ((e.act_peak / e.ref - 1) * 100).toFixed(1) + "% · " + esc((e.act_day || "").slice(5))) : ""}</div></div></div>`).join("");
+      <div class="g"><div>기준가<b>${pfmt(e.ref)}</b>목표 +${e.th}%</div><div>예상 고점<b>${pfmt(e.peak)}</b>${esc((e.day || "").slice(5))}</div>
+        <div>실제 고점<b class="${e.act_peak >= e.ref * (1 + e.th / 100) ? 'up' : ''}">${e.act_peak ? pfmt(e.act_peak) : "-"}</b>${e.act_peak ? (((e.act_peak / e.ref - 1) * 100 >= 0 ? "+" : "") + ((e.act_peak / e.ref - 1) * 100).toFixed(1) + "% · " + esc((e.act_day || "").slice(5))) : ""}</div></div></div>`).join("") || '<div class="empty">이 날짜엔 고정된 추천이 없어요</div>';
     const F = (P.fail || {})[PH];
     const RV = (P.review || {})[PH];
     h += `<div style="font-weight:800;margin:16px 0 6px">📝 실패 복기 · 어떤 종목이 왜 틀렸나</div>`;
