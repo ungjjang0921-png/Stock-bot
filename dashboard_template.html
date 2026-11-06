@@ -20,6 +20,27 @@ input,select{flex:1;min-width:0;background:var(--panel);border:1px solid var(--l
 select{flex:0 0 auto;max-width:46%}
 .chips{display:flex;gap:6px;overflow-x:auto;margin-top:8px;padding-bottom:2px;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
+.cz{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:8px 0}
+.cz span{text-align:center;padding:7px 0;border-radius:10px;font-size:12.5px;color:var(--muted);cursor:pointer}
+.cz span small{display:block;font-size:10.5px;opacity:.7}.cz span.on{background:var(--panel2);color:var(--text);font-weight:800}
+.ce{display:flex;gap:6px;overflow-x:auto;margin:6px 0 10px;scrollbar-width:none}.ce::-webkit-scrollbar{display:none}
+.ce span{white-space:nowrap;padding:6px 11px;border-radius:16px;background:var(--panel);font-size:12px;cursor:pointer;border:1px solid var(--line)}
+.ce span.on{background:#3a1d24;color:#ff7b8a;border-color:#5a2b33}
+.cc{border-bottom:1px solid var(--line);padding:12px 2px}
+.cc .t1{display:grid;grid-template-columns:22px 1fr auto;gap:8px;align-items:start}
+.cc .rk{font-weight:800;color:var(--muted);padding-top:2px}.cc .tk{font-weight:800;font-size:15.5px}.cc .nm{font-size:11.5px;color:var(--muted)}
+.cc .up2{text-align:right;font-weight:800;font-size:17px;color:#ff5d6c}.cc .up2 small{display:block;font-size:10.5px;color:var(--muted);font-weight:400}
+.cc .en{font-size:12.5px;margin:6px 0 4px 30px;color:var(--muted)}.cc .en b{color:var(--text)}
+.cc .eh{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin:4px 0 4px 30px}
+.dots i{display:inline-block;width:7px;height:11px;border-radius:2px;background:#3a3f4a;margin-left:2px}.dots i.f{background:#ff5d6c}
+.eg{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-left:30px}
+.eg div{border-radius:10px;text-align:center;padding:6px 0;font-size:10.5px;background:#161a22;color:#4b5563;border:1px solid transparent}
+.eg div b{display:block;font-size:14px}
+.eg .r1{background:#e5484d;color:#fff}.eg .r2{background:#3a1d24;color:#ff7b8a;border-color:#7a2b35}.eg .r3{background:var(--panel2);color:var(--text);border-color:var(--line)}
+.cd{margin:8px 0 0 30px;display:none}.cc.open .cd{display:block}
+.cd .eb{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:6px;font-size:12px;line-height:1.6}
+.cd .eb h5{margin:0 0 4px;font-size:12.5px;display:flex;justify-content:space-between}
+.cst{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px;font-size:12px;line-height:1.7;margin-bottom:8px}
 .cal{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px}
 .cal .ch{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 .cal .ch span{padding:2px 14px;font-size:20px;cursor:pointer;color:var(--accent)}.cal .ch b{font-size:14px}
@@ -164,8 +185,8 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .prob .pb i{display:block;height:100%;border-radius:3px;background:var(--good)}
 .prob em{font-style:normal;font-size:10.5px;color:var(--muted)}
 .prob .act{display:inline-block;margin-top:2px;font-size:11px;font-weight:700}
-.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:10px}
-.tab{flex:1;text-align:center;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:10px;padding:9px 2px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:10px}
+.tab{flex:1;text-align:center;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:10px;padding:9px 2px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
 .tab.on{border-color:var(--accent);color:var(--text);background:#0f2433}
 .hide{display:none!important}
 .cand{background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-bottom:12px;overflow:hidden}
@@ -260,7 +281,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 <header>
   <h1>🎯 펌핑 목적 워치리스트</h1>
   <div class="sub" id="sub"></div>
-  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="surge">🚀 급등</span><span class="tab" data-v="jb">🎯 종배</span><span class="tab" data-v="pred">🔮 예측</span><span class="tab" data-v="cal">📅 일정</span><span class="tab" data-v="sq">🩳 숏스퀴즈</span></div>
+  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="surge">🚀 급등</span><span class="tab" data-v="jb">🎯 종배</span><span class="tab" data-v="catch">📡 포착</span><span class="tab" data-v="pred">🔮 예측</span><span class="tab" data-v="cal">📅 일정</span><span class="tab" data-v="sq">🩳 숏스퀴즈</span></div>
   <div class="controls" id="ctl">
     <input id="q" placeholder="티커·회사명 검색" autocomplete="off">
     <select id="sort">
@@ -477,6 +498,18 @@ function deepBlock(it){
     <div class="ds"><div class="dt">보유자·내부자 <small>13D/G·Form 4·144 — 누가 사고 누가 파나</small></div>${hs || '<div style="font-size:11.5px;color:var(--muted)">최근 1년 보유자 공시 없음</div>'}</div>
   </div>`;
 }
+const EN = [["preview","👁","프리뷰","장중 흐름 — 비슷한 장중 상황에서 +20%(프리장은 +10%) 친 비율"],["signal","📈","시그널","학습 모델 — 급등 판별 점수(백분위)·검증 확률"],["best","🏅","베스트","유사 사례 150건 — +30% 사례율·목표 선도달률"],["burn","🔥","버닝업","강하게 치솟는 종목 — 5일 확률 70 + 당일 상승 20 + 유통 10"],["squeeze","🩳","스퀴즈","공매도·대차 이자·유통 — 숏커버 압력"]];
+function catchDetail(c, hz){
+  const e = c.eng, out = [];
+  const pc = v => v == null ? "-" : `${v >= 0 ? "+" : ""}${(+v).toFixed(1)}%`;
+  if (e.preview) out.push(["preview", `${hz === "0" ? "오늘" : "다음 거래일"} 장중 +20% 터치 비율 <b>${e.preview.reg ?? "-"}%</b>${e.preview.pre != null ? ` · 프리장 +10% ${e.preview.pre}%` : ""} · VWAP ${e.preview.vwap ? "위 ✅" : "아래"} · 거래량 ${e.preview.rv ?? "-"}배`]);
+  if (e.signal) out.push(["signal", `판별 백분위 <b>${e.signal.p}</b>/100 · 패턴 <b>${esc(e.signal.pat || "-")}</b><br>검증 확률 1일 ${e.signal.probs["1"] ?? "-"}% · 5일 ${e.signal.probs["5"] ?? "-"}% · 10일 ${e.signal.probs["10"] ?? "-"}% <small>(표본 부족하면 -)</small>`]);
+  if (e.best) out.push(["best", `+30% 사례율 <b>${e.best.r30}%</b> · 목표 선도달률(−10% 손절보다 +30% 먼저) <b>${e.best.ft}%</b><br>전체 사례 최고 상승 P20~P80 ${pc(e.best.q[0])} ~ ${pc(e.best.q[2])}${e.best.cq ? ` · 급등한 경우 중앙 ${pc(e.best.cq[1])}` : ""} · 유사도 ${e.best.sim}`]);
+  if (e.burn) out.push(["burn", `감지점수 <b>${e.burn.det}</b>/100 (5일 백분위 ${e.burn.p5} · 당일 ${pc(e.burn.chg)} · 유통 ${e.burn.fl ? (e.burn.fl / 1e6).toFixed(1) + "M" : "-"})${e.burn.q ? `<br>비슷한 급등 ${e.burn.n}건 이후 최고 중앙 ${pc(e.burn.q[1])} (25~75% ${pc(e.burn.q[0])} ~ ${pc(e.burn.q[2])})` : ""}`]);
+  if (e.squeeze) out.push(["squeeze", `스퀴즈 점수 <b>${e.squeeze.score}</b> · 공매도/유통 ${e.squeeze.si != null ? e.squeeze.si.toFixed(1) + "%" : "-"} · 대차 이자 ${e.squeeze.fee != null ? e.squeeze.fee.toFixed(0) + "%" : "-"} · ${esc(e.squeeze.st || "")}`]);
+  return out.map(([k, txt]) => { const m = EN.find(x => x[0] === k); return `<div class="eb"><h5><span>${m[1]} ${m[2]} <small style="color:var(--muted);font-weight:400">${esc(m[3])}</small></span><b style="color:#ff7b8a">${e[k].rank}위</b></h5>${txt}</div>`; }).join("");
+}
+function catchToggle(t){ const el = document.getElementById("cc-" + t); if (el) el.classList.toggle("open"); }
 function tradeBlock(it){
   const t = it && it.trade; if (!t) return "";
   const pc = v => (v / it.price - 1) * 100;
@@ -656,6 +689,42 @@ function render(){
       h += `<div class="crow" onclick="openCard('${esc(e.t)}')"><b>${TK(e.t)}</b><div><em>${esc(e.ev)}</em><small>${esc(e.name)} · ${esc(e.note)}</small></div></div>`;
     }
     $("#list").innerHTML = xs.length ? h : h + '<div class="empty">14일 안에 확인된 일정이 없어요</div>';
+    return;
+  }
+  if (TAB === "catch"){
+    const C = DATA.catch || {}, HZ = C.hz || {};
+    window.CH = window.CH || "1"; window.CE = window.CE || "all"; window.CS = window.CS || "n";
+    const lab = {"0": "오늘", "1": "1거래일", "5": "5거래일", "10": "10거래일"};
+    const Z = HZ[CH] || {list: [], counts: {}};
+    $("#sub").textContent = `${DATA.updated} 업데이트 · ${C.sess || ""} ${C.at ? "(" + C.at + ")" : ""}`;
+    let h = `<div class="intro">📡 <b>포착</b> — 5개 엔진이 각자 상위 20개를 고르고, <b>여러 엔진이 같이 잡은 종목</b>을 위로 올려요 (많이 포착된 순 → 평균 순위). 카드를 누르면 엔진별 근거가 나와요.<br><span style="color:var(--muted)">칸 색: 진한 빨강 1~3위 · 빨간 테두리 4~10위 · 회색 11~20위. 🎯 = 3개 이상 엔진이 겹치고 경고 없음</span></div>
+      <div class="cz">${["0","1","5","10"].map(k => `<span class="${CH === k ? "on" : ""}" onclick="CH='${k}';render()">${lab[k]}<small>${(HZ[k] || {list: []}).list.length}</small></span>`).join("")}</div>`;
+    const S = (C.stat || {})[CH];
+    if (S && S.all && S.all.n) {
+      const r = x => x && x.n ? `<b>${x.r}%</b> <small>(${x.k}/${x.n})</small>` : "-";
+      h += `<div class="cst">📊 최근 ${S.days}거래일 실제 성적 — ${CH === "0" ? "포착 때 가격 대비 당일 고가" : "종가 대비 다음날 고가"} +${S.th}% 이상 적중률<br>
+        전체 ${r(S.all)} · 엔진 1개 ${r(S.by_n["1"])} · 2개 ${r(S.by_n["2"])} · <b>3개 이상 ${r(S.by_n["3"])}</b> · 🎯 ${r(S.focus)}<br>
+        <span style="color:var(--muted)">엔진별(10위 안): ${EN.map(([k, , n]) => `${n} ${S.eng[k] && S.eng[k].n ? S.eng[k].r + "%" : "-"}`).join(" · ")}</span></div>`;
+    } else if (CH === "0" || CH === "1") h += `<div class="cst" style="color:var(--muted)">📊 ${CH === "0" ? "오늘 탭은 정규장 시작 15분 뒤" : "1거래일 탭은 장 마감 뒤"} 목록을 고정해서 다음 날 실제 결과로 엔진별 적중률을 매겨요. 며칠 쌓이면 여기에 성적이 나와요.</div>`;
+    if (CH === "0" && !C.live) h += `<div class="cst" style="color:var(--muted)">지금은 미국 장이 닫혀 있어서 오늘 탭은 마지막 장중 기준이에요. 프리장(한국 오후 6시)부터 다시 채워져요.</div>`;
+    h += `<div class="ce"><span class="${CE === "all" ? "on" : ""}" onclick="CE='all';render()">모든 엔진</span>${EN.map(([k, ic, n]) => `<span class="${CE === k ? "on" : ""}" onclick="CE='${k}';render()">${ic} ${n} ${Z.counts[k] != null ? Z.counts[k] : "-"}</span>`).join("")}</div>
+      <div style="text-align:right;margin-bottom:4px"><select onchange="CS=this.value;render()" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px">
+        <option value="n" ${CS === "n" ? "selected" : ""}>많이 포착된 순</option><option value="up" ${CS === "up" ? "selected" : ""}>상승여력 순</option></select></div>`;
+    let L = Z.list.filter(c => CE === "all" || c.eng[CE]);
+    if (CE !== "all") L = L.slice().sort((a, b) => a.eng[CE].rank - b.eng[CE].rank);
+    else if (CS === "up") L = L.slice().sort((a, b) => (b.up ?? -99) - (a.up ?? -99));
+    const cls = r => r <= 3 ? "r1" : r <= 10 ? "r2" : "r3";
+    h += L.map((c, i) => `<div class="cc" id="cc-${esc(c.t)}"><div class="t1" onclick="catchToggle('${esc(c.t)}')" style="cursor:pointer"><span class="rk">${i + 1}</span>
+        <div><div class="tk">${c.focus ? "🎯 " : ""}${esc(c.t)}</div><div class="nm">${esc((c.name || "").slice(0, 32))}${c.pat ? " · " + esc(c.pat) : ""}</div></div>
+        <div class="up2">${c.up != null ? (c.up >= 0 ? "+" : "") + c.up.toFixed(1) + "%" : "-"}<small>상승여력(급등 시)</small></div></div>
+      <div class="en">진입 <b>${usd(c.px)}</b> → 예상 <b>${c.exp ? usd(c.exp) : "-"}</b> <small>(급등 시 중앙)</small>${c.rng ? ` <small>(범위 ${c.rng[0] >= 0 ? "+" : ""}${c.rng[0]}% ~ +${c.rng[1]}%)</small>` : ""}${c.chg != null ? ` · 오늘 <span class="${c.chg >= 0 ? "up" : "dn"}">${c.chg >= 0 ? "+" : ""}${(+c.chg).toFixed(1)}%</span>` : ""}</div>
+      ${c.warn.length ? `<div class="en" style="color:#ff8f8f">⚠️ ${c.warn.map(esc).join(" · ")}</div>` : ""}
+      <div class="eh"><span>포착 엔진</span><span class="dots">${[0,1,2,3,4].map(k => `<i class="${k < c.n ? "f" : ""}"></i>`).join("")} ${c.n}/5</span></div>
+      <div class="eg">${EN.map(([k, ic]) => c.eng[k] ? `<div class="${cls(c.eng[k].rank)}">${ic} 포착<b>${c.eng[k].rank}위</b></div>` : `<div>${ic}<b>-</b></div>`).join("")}</div>
+      <div class="cd">${catchDetail(c, CH)}${tradeBlock(DATA.items.find(x => x.t === c.t)).replace('class="tp"', 'class="tp" style="margin:0 0 6px"')}
+        ${DATA.items.find(x => x.t === c.t) ? `<a class="go" href="#" onclick="openCard('${esc(c.t)}');return false">워치에서 전체 보기 →</a>` : ""}</div></div>`).join("")
+      || '<div class="empty">이 기간에 포착된 종목이 없어요</div>';
+    $("#list").innerHTML = h;
     return;
   }
   if (TAB === "sq"){

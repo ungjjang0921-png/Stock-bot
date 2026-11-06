@@ -76,6 +76,23 @@ def features(df: pd.DataFrame) -> pd.DataFrame:
             dpk[:len(win)] = np.argmax(win, axis=1) + 1
             dpk[len(df) - H:] = np.nan
         f[f"d{H}"] = dpk
+    # 목표 선도달: H일 안에 +30%가 -10% 손절보다 먼저 닿았나 (같은 날 둘 다면 손절로 봄 — 보수적)
+    hv_, lv_, cv_ = h.values.astype(float), l.values.astype(float), c.values.astype(float)
+    n_ = len(df)
+    for H in HORIZONS:
+        res_ = np.full(n_, np.nan)
+        dec = np.zeros(n_, bool)
+        out_ = np.zeros(n_)
+        for k in range(1, H + 1):
+            hk = np.full(n_, np.nan); lk = np.full(n_, np.nan)
+            hk[:n_ - k] = hv_[k:] / cv_[:n_ - k] - 1
+            lk[:n_ - k] = lv_[k:] / cv_[:n_ - k] - 1
+            loss = ~dec & (lk <= -0.10)
+            win = ~dec & ~loss & (hk >= 0.30)
+            out_[win] = 1
+            dec |= loss | win
+        res_[:n_ - H] = out_[:n_ - H]
+        f[f"ft{H}"] = res_
     f["close"] = c
     f["vbin"] = np.log1p(v / v.rolling(20).mean().shift(1))
     return f.replace([np.inf, -np.inf], np.nan)
@@ -292,6 +309,12 @@ def run(prices: dict[str, pd.DataFrame], info: dict[str, dict], cutoff: date, lo
                           "day": _add_bd(asof, int(round(dd_med))).isoformat(),
                           "why": [FEAT_KO[f] for f, v in top if v > 0]})
         cands.sort(key=lambda c: (not c["sure"], bool(c["risk"]), not c["rsi20"], -c["score"]))
+        # ── 포착 엔진용: 전 종목 점수 + 유사 사례(과거에 지금과 비슷했던 날들의 실제 결과)
+        try:
+            out.setdefault("scores", {})[str(H)] = engine_scores(
+                latest, Xn_now, p_now, cal, tr, Xn_tr, gcol, f"ft{H}", H)
+        except Exception as e:
+            log.warning("%d거래일 엔진 점수 실패: %s", H, e)
         imp = sorted(zip(FEATS, w), key=lambda x: -abs(x[1]))[:6]
         out["horizons"][str(H)] = {
             "th": int(th * 100), "old": old, "new": new, "model": best, "models": res, "base": base_rate,
@@ -504,4 +527,73 @@ def review(path: Path, A: pd.DataFrame, prices: dict, filings: dict) -> dict:
         n_hit = sum(1 for e in book if e["h"] == H and e.get("done") and e["res"] == "적중")
         out[str(H)] = {"rows": rows[:40], "n_miss": len(done), "n_hit": n_hit,
                        "top": sorted(cnt.items(), key=lambda x: -x[1])[:6]}
+    return out
+
+
+ANALOG_K = 150           # 유사 사례 수
+BURN_K = 30              # 버닝업: 비슷한 급등 사건 수
+
+
+def pattern(r) -> str:
+    """지금 차트 모양 한 줄"""
+    rv = float(np.expm1(r["relvol"]))
+    if r["range20"] < 0.35 and rv >= 1.5:
+        return "변동폭 축소·거래량 증가"
+    if r["pump"] >= 0.5 and r["ret5"] < -0.1:
+        return "선행 급등 후 조정"
+    if r["ret1"] >= 0.15:
+        return "당일 급등 진행"
+    if r["dlow"] < 0.15 and r["rsi"] < 0.35:
+        return "바닥권 과매도"
+    if r["ma20"] > 0 and r["ma50"] > 0 and rv >= 1.2:
+        return "추세 위 거래량 유입"
+    if r["dhigh"] > -0.1:
+        return "고점 근처 돌파 시도"
+    return "횡보"
+
+
+def engine_scores(latest, Xn_now, p_now, cal, tr, Xn_tr, gcol, ftcol, H) -> dict:
+    """전 종목: 모델 백분위·보정 확률 + 유사 사례 kNN (+30% 사례율·목표 선도달률·상승여력 분포)"""
+    rng = np.random.default_rng(7)
+    ok = ~np.isnan(tr[ftcol].values)
+    idx = np.where(ok)[0]
+    if len(idx) > 120_000:
+        idx = rng.choice(idx, 120_000, replace=False)
+    Y = Xn_tr[idx].astype(np.float32)
+    g = tr[gcol].values[idx]
+    ft = tr[ftcol].values[idx]
+    r1 = tr["ret1"].values[idx]
+    yy = (Y ** 2).sum(1)
+    burn_pool = np.where(r1 >= 0.10)[0]
+    out = {}
+    Q = Xn_now.astype(np.float32)
+    for s0 in range(0, len(Q), 32):
+        q = Q[s0:s0 + 32]
+        d2 = (q ** 2).sum(1)[:, None] + yy[None, :] - 2 * q @ Y.T
+        nn = np.argpartition(d2, ANALOG_K, axis=1)[:, :ANALOG_K]
+        for j in range(len(q)):
+            i = s0 + j
+            t = latest.index[i]
+            sel = nn[j]
+            gg = g[sel]
+            sc = float(p_now[i])
+            bk = next((k for k in sorted(cal, reverse=True) if sc >= k), None)
+            row = latest.iloc[i]
+            dist = float(np.sqrt(max(d2[j, sel].mean(), 0)))
+            rec = {"p": round(sc, 1), "prob": cal[bk]["p"] if bk is not None else None,
+                   "r30": round(float((gg >= 0.30).mean()) * 100, 1),
+                   "ft": round(float(ft[sel].mean()) * 100, 1),
+                   "q": [round(float(np.percentile(gg, x)) * 100, 1) for x in (20, 50, 80)],
+                   "cq": ([round(float(np.percentile(gg[gg >= HORIZONS[H]], x)) * 100, 1) for x in (25, 50, 75)]
+                          if (gg >= HORIZONS[H]).sum() >= 8 else None),
+                   "sim": round(100 / (1 + dist), 1), "pat": pattern(row),
+                   "ret1": round(float(row["ret1"]) * 100, 1), "px": float(row["close"]),
+                   "rv": round(float(np.expm1(row["relvol"])), 1)}
+            if row["ret1"] >= 0.10 and len(burn_pool) >= BURN_K:     # 버닝업: 비슷한 급등 사건
+                bd = d2[j, burn_pool]
+                bn = burn_pool[np.argpartition(bd, BURN_K)[:BURN_K]]
+                bg = g[bn]
+                rec["burn"] = {"q": [round(float(np.percentile(bg, x)) * 100, 1) for x in (25, 50, 75)],
+                               "n": BURN_K, "sim": round(100 / (1 + float(np.sqrt(max(bd[np.argpartition(bd, BURN_K)[:BURN_K]].mean(), 0)))), 1)}
+            out[t] = rec
     return out

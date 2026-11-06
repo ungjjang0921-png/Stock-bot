@@ -2315,6 +2315,7 @@ def build_squeeze(items: list) -> list[dict]:
 
 
 SQUEEZE: list = []
+CATCH: dict = {}
 
 
 # ───────────────── 8. 출력 ─────────────────
@@ -2338,7 +2339,7 @@ def write_page(items: list[dict], surge=None, jbc=None) -> None:
     tpl = (ROOT / "dashboard_template.html").read_text(encoding="utf-8")
     payload = _clean({"updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"), "items": items,
                       "forward": FORWARD_DAYS, "surge": surge or [], "jbc": jbc or [],
-                      "cal": CALENDAR, "sq": SQUEEZE, "pred": PRED,
+                      "cal": CALENDAR, "sq": SQUEEZE, "pred": PRED, "catch": CATCH,
                       "rules": {"reg": int(SURGE_REG * 100), "pre": int(SURGE_PRE * 100), "jb": int(JB_HIT * 100)}})
     data = json.dumps(payload, ensure_ascii=False, default=lambda o: None).replace("</", "<\\/")
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -2433,11 +2434,22 @@ def main():
                 PRED["fail_ai"] = c[key]
         except Exception as e:
             log.exception("예측 실패: %s", e)
-    global SQUEEZE
+    global SQUEEZE, CATCH
     try:
         SQUEEZE = build_squeeze(items)
     except Exception as e:
         log.exception("숏스퀴즈 실패: %s", e)
+    try:                                            # 📡 포착: 5개 엔진 합의
+        import catch as catchmod
+        now_et = datetime.now(ET)
+        live = now_et.weekday() < 5 and dtime(4, 0) <= now_et.time() < dtime(20, 0)
+        CATCH = catchmod.build(items, PRED, SQUEEZE, now_et, live)
+        CATCH["stat"] = catchmod.ledger(CATCH, PRICES, OUT.parent / "catch_log.json", now_et, now_et.date())
+        CATCH["at"] = now_et.strftime("%m/%d %H:%M ET")
+        CATCH["sess"] = ("프리장" if now_et.time() < dtime(9, 30) else "정규장" if now_et.time() < dtime(16, 0)
+                         else "애프터") if live else "장 마감"
+    except Exception as e:
+        log.exception("포착 엔진 실패: %s", e)
     try:
         run_deep(items, PRED, datetime.now(KST).date())
     except Exception as e:
