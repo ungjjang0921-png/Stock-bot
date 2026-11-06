@@ -39,25 +39,27 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool) 
         S = sc.get(H) or {}
         S5 = sc.get("5") or {}
         eng = {}
-        # 👁 프리뷰 — 장중(오늘·1거래일만)
+        # 👁 프리뷰 — 장중 급등 흐름 (오늘·1거래일): 오늘 오르고 있는 종목 중
+        #   비슷한 장중 상황의 +20% 터치 비율 + 당일 상승 + 거래량, VWAP 아래·하락 종목은 제외
         if hz in ("0", "1"):
             rows = []
+            pre_mode = now_et.time() < dtime(9, 30)
             for it in items:
                 pb = it.get("prob") or {}
-                pre_mode = now_et.time() < dtime(9, 30)
                 pr = pb.get("pre") if pre_mode and pb.get("pre") is not None else pb.get("reg")
                 sn = it.get("snap") or {}
-                if pr is None or "부도 위험" in _risk(it):
+                chg, rv, vw = sn.get("chg"), sn.get("relvol") or 0, sn.get("vwap")
+                if pr is None or chg is None or chg < 3 or "부도 위험" in _risk(it):
                     continue
-                s = pr
-                if sn.get("vwap") and it["price"] >= sn["vwap"]:
-                    s *= 1.15
-                if (sn.get("relvol") or 0) >= 2:
-                    s *= 1.1
-                rows.append((s, it["t"], {"reg": round(pr, 1), "pre": pb.get("pre"),
-                                          "vwap": bool(sn.get("vwap") and it["price"] >= sn["vwap"]),
-                                          "rv": round(sn["relvol"], 1) if sn.get("relvol") else None}))
+                if vw and it["price"] < vw * 0.98:
+                    continue
+                s = pr + 0.5 * min(chg, 100) + 4 * min(rv, 10)
+                rows.append((s, it["t"], {"reg": round(pr, 1), "pre": pb.get("pre"), "chg": round(chg, 1),
+                                          "vwap": bool(vw and it["price"] >= vw), "rv": round(rv, 1) if rv else None}))
             eng["preview"] = rows
+        if hz == "0":                      # 오늘 탭은 장중 엔진(프리뷰)만 — RabbitStock과 같은 방식
+            _finish(out, hz, eng, by, S, sc)
+            continue
         # 📈 시그널 — 모델 백분위
         rows = []
         for t, r in S.items():
@@ -94,37 +96,42 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool) 
         # 🩳 스퀴즈
         eng["squeeze"] = [(c["score"], c["t"], {"score": c["score"], "si": c.get("si"), "fee": c.get("fee"),
                                                  "st": c.get("st")}) for c in (squeeze or [])]
-        # 엔진별 순위 → 종목별 합치기
-        cat = {}
-        for k, rows in eng.items():
-            rows = sorted(rows, key=lambda x: -x[0])[:TOP]
-            for rk, (_, t, d) in enumerate(rows, 1):
-                cat.setdefault(t, {})[k] = dict(d, rank=rk)
-        lst = []
-        for t, e in cat.items():
-            it = by.get(t) or {}
-            r = S.get(t) or {}
-            px = it.get("price") or r.get("px")
-            if not px:
-                continue
-            # 예상가: 버닝업 유사 급등 중앙값 → 베스트 유사 사례 중앙값 → 시그널 분포 중앙값
-            # 급등이 실제로 나온다는 조건에서의 고점 분포 (유사 사례 중 기준 이상 간 것들)
-            q = r.get("cq") or (e.get("burn") or {}).get("q") or r.get("q")
-            mid = q[1] if q else None
-            sn = it.get("snap") or {}
-            warn = _risk(it)
-            if sn.get("day_hi") and px < sn["day_hi"] * 0.85:
-                warn.append(f"당일 고점 대비 -{(1 - px / sn['day_hi']) * 100:.0f}% 밀림")
-            if sn.get("vwap") and px < sn["vwap"] and (sn.get("chg") or 0) > 20:
-                warn.append("급등 후 VWAP 아래")
-            ranks = [v["rank"] for v in e.values()]
-            lst.append({"t": t, "name": it.get("name", ""), "px": px, "exp": px * (1 + mid / 100) if mid else None,
-                        "up": mid, "rng": [q[0], q[2]] if q else None, "n": len(e), "avg": round(float(np.mean(ranks)), 1),
-                        "eng": e, "warn": warn, "pat": r.get("pat"), "chg": sn.get("chg", r.get("ret1")),
-                        "focus": len(e) >= 3 and not warn})
-        lst.sort(key=lambda x: (-x["n"], x["avg"]))
-        out["hz"][hz] = {"list": lst[:60], "counts": {k: min(len(v), TOP) for k, v in eng.items()}}
+        _finish(out, hz, eng, by, S, sc)
     return out
+
+
+def _finish(out, hz, eng, by, S, sc):
+    # 엔진별 순위 → 종목별 합치기
+    cat = {}
+    for k, rows in eng.items():
+        rows = sorted(rows, key=lambda x: -x[0])[:TOP]
+        for rk, (_, t, d) in enumerate(rows, 1):
+            cat.setdefault(t, {})[k] = dict(d, rank=rk)
+    lst = []
+    for t, e in cat.items():
+        it = by.get(t) or {}
+        r = S.get(t) or {}
+        px = it.get("price") or r.get("px")
+        if not px:
+            continue
+        # 예상가: 버닝업 유사 급등 중앙값 → 베스트 유사 사례 중앙값 → 시그널 분포 중앙값
+        # 급등이 실제로 나온다는 조건에서의 고점 분포 (유사 사례 중 기준 이상 간 것들)
+        q = r.get("cq") or (e.get("burn") or {}).get("q") or r.get("q")
+        mid = q[1] if q else None
+        sn = it.get("snap") or {}
+        warn = _risk(it)
+        if sn.get("day_hi") and px < sn["day_hi"] * 0.85:
+            warn.append(f"당일 고점 대비 -{(1 - px / sn['day_hi']) * 100:.0f}% 밀림")
+        if sn.get("vwap") and px < sn["vwap"] and (sn.get("chg") or 0) > 20:
+            warn.append("급등 후 VWAP 아래")
+        ranks = [v["rank"] for v in e.values()]
+        lst.append({"t": t, "name": it.get("name", ""), "px": px, "exp": px * (1 + mid / 100) if mid else None,
+                    "up": mid, "cond": bool(r.get("cq") or (e.get("burn") or {}).get("q")), "rng": [q[0], q[2]] if q else None, "n": len(e), "avg": round(float(np.mean(ranks)), 1),
+                    "eng": e, "warn": warn, "pat": r.get("pat"), "chg": sn.get("chg", r.get("ret1")),
+                    "focus": (len(e) >= 3 or (hz == "0" and e.get("preview", {}).get("rank", 99) <= 5)) and not warn})
+    lst.sort(key=lambda x: (-x["n"], x["avg"]))
+    out["hz"][hz] = {"list": lst[:60], "counts": {k: min(len(v), TOP) for k, v in eng.items()},
+                     "only": ["preview"] if hz == "0" else None}
 
 
 # ── 고정 기록과 적중률 ──
