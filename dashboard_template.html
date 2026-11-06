@@ -518,6 +518,25 @@ function catchDetail(c, hz){
   if (e.squeeze) out.push(["squeeze", `스퀴즈 점수 <b>${e.squeeze.score}</b> · 공매도/유통 ${e.squeeze.si != null ? e.squeeze.si.toFixed(1) + "%" : "-"} · 대차 이자 ${e.squeeze.fee != null ? e.squeeze.fee.toFixed(0) + "%" : "-"} · ${esc(e.squeeze.st || "")}`]);
   return out.map(([k, txt]) => { const m = EN.find(x => x[0] === k); return `<div class="eb"><h5><span>${m[1]} ${m[2]} <small style="color:var(--muted);font-weight:400">${esc(m[3])}</small></span><b style="color:#ff7b8a">${e[k].rank}위</b></h5>${txt}</div>`; }).join("");
 }
+function catchCards(L, Z){
+  const cls = r => r <= 3 ? "r1" : r <= 10 ? "r2" : "r3";
+  return L.map((c, i) => `<div class="cc" id="cc-${esc(c.t)}"><div class="t1" onclick="catchToggle('${esc(c.t)}')" style="cursor:pointer"><span class="rk">${i + 1}</span>
+        <div><div class="tk">${c.focus ? "🎯 " : ""}${esc(c.t)}</div><div class="nm">${esc((c.name || "").slice(0, 32))}${c.pat ? " · " + esc(c.pat) : ""}</div></div>
+        <div class="up2">${c.up != null ? (c.up >= 0 ? "+" : "") + c.up.toFixed(1) + "%" : "-"}<small>${c.cond ? "상승여력(급등 시)" : "상승여력"}</small></div></div>
+      <div class="en">진입 <b>${usd(c.px)}</b> → 예상 <b>${c.exp ? usd(c.exp) : "-"}</b> <small>(${c.cond ? "급등 시 중앙" : "유사 사례 중앙"})</small>${c.rng ? ` <small>(범위 ${c.rng[0] >= 0 ? "+" : ""}${c.rng[0]}% ~ +${c.rng[1]}%)</small>` : ""}${c.chg != null ? ` · 오늘 <span class="${c.chg >= 0 ? "up" : "dn"}">${c.chg >= 0 ? "+" : ""}${(+c.chg).toFixed(1)}%</span>` : ""}</div>
+      ${c.warn.length ? `<div class="en" style="color:#ff8f8f">⚠️ ${c.warn.map(esc).join(" · ")}</div>` : ""}
+      <div class="eh"><span>포착 엔진</span><span class="dots">${[0,1,2,3,4].map(k => `<i class="${k < c.n ? "f" : ""}"></i>`).join("")} ${c.n}/5</span></div>
+      <div class="eg">${EN.map(([k, ic]) => c.eng[k] ? `<div class="${cls(c.eng[k].rank)}">${ic} 포착<b>${c.eng[k].rank}위</b></div>` : Z.only && !Z.only.includes(k) ? `<div>${ic}<b style="font-size:10.5px;font-weight:400">대상외</b></div>` : `<div>${ic}<b>-</b></div>`).join("")}</div>
+      <div class="cd">${catchDetail(c, CH)}${tradeBlock(DATA.items.find(x => x.t === c.t)).replace('class="tp"', 'class="tp" style="margin:0 0 6px"')}
+        ${DATA.items.find(x => x.t === c.t) ? `<a class="go" href="#" onclick="openCard('${esc(c.t)}');return false">워치에서 전체 보기 →</a>` : ""}</div></div>`).join("")
+      || '<div class="empty">이 기간에 포착된 종목이 없어요</div>';
+}
+function catchFilter(){
+  const q = (window.CQ || "").trim().toUpperCase();
+  const L = (window.CL || []).filter(c => !q || c.t.includes(q) || (c.name || "").toUpperCase().includes(q));
+  const box = document.getElementById("ccl"); if (!box) return;
+  box.innerHTML = L.length ? catchCards(L, window.CZ) : (q ? `<div class="empty">'${esc(q)}' 는 이 기간 포착 목록에 없어요</div>` : '<div class="empty">이 기간에 포착된 종목이 없어요</div>');
+}
 function catchToggle(t){ const el = document.getElementById("cc-" + t); if (el) el.classList.toggle("open"); }
 function tradeBlock(it){
   const t = it && it.trade; if (!t) return "";
@@ -718,23 +737,15 @@ function render(){
     if (CH === "0") h += `<div class="cst" style="color:var(--muted)">오늘 탭은 RabbitStock처럼 <b style="color:var(--text)">장중 엔진(프리뷰)만</b> 순위를 매겨요. 오늘 +3% 이상 오르고 VWAP 위에 있는 종목 중, 비슷한 장중 상황에서 +20%(프리장 +10%)를 친 비율·당일 상승·거래량으로 줄 세워요. 미국 정규장이 열린 뒤(한국 밤 11시 반) 갱신 때 제대로 채워져요.</div>`;
     if (CH === "0" && !C.live) h += `<div class="cst" style="color:var(--muted)">지금은 미국 장이 닫혀 있어서 오늘 탭은 마지막 장중 기준이에요. 프리장(한국 오후 6시)부터 다시 채워져요.</div>`;
     h += `<div class="ce"><span class="${CE === "all" ? "on" : ""}" onclick="CE='all';render()">모든 엔진</span>${EN.map(([k, ic, n]) => `<span class="${CE === k ? "on" : ""}" onclick="CE='${k}';render()">${ic} ${n} ${Z.counts[k] != null ? Z.counts[k] : "-"}</span>`).join("")}</div>
-      <div style="text-align:right;margin-bottom:4px"><select onchange="CS=this.value;render()" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px">
+      <div style="display:flex;gap:6px;margin-bottom:4px"><input id="cq" placeholder="🔍 티커·회사명 검색" value="${esc(window.CQ || "")}" oninput="CQ=this.value;catchFilter()" style="flex:1;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px"><select onchange="CS=this.value;render()" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px">
         <option value="n" ${CS === "n" ? "selected" : ""}>많이 포착된 순</option><option value="up" ${CS === "up" ? "selected" : ""}>상승여력 순</option></select></div>`;
     let L = Z.list.filter(c => CE === "all" || c.eng[CE]);
     if (CE !== "all") L = L.slice().sort((a, b) => a.eng[CE].rank - b.eng[CE].rank);
     else if (CS === "up") L = L.slice().sort((a, b) => (b.up ?? -99) - (a.up ?? -99));
-    const cls = r => r <= 3 ? "r1" : r <= 10 ? "r2" : "r3";
-    h += L.map((c, i) => `<div class="cc" id="cc-${esc(c.t)}"><div class="t1" onclick="catchToggle('${esc(c.t)}')" style="cursor:pointer"><span class="rk">${i + 1}</span>
-        <div><div class="tk">${c.focus ? "🎯 " : ""}${esc(c.t)}</div><div class="nm">${esc((c.name || "").slice(0, 32))}${c.pat ? " · " + esc(c.pat) : ""}</div></div>
-        <div class="up2">${c.up != null ? (c.up >= 0 ? "+" : "") + c.up.toFixed(1) + "%" : "-"}<small>${c.cond ? "상승여력(급등 시)" : "상승여력"}</small></div></div>
-      <div class="en">진입 <b>${usd(c.px)}</b> → 예상 <b>${c.exp ? usd(c.exp) : "-"}</b> <small>(${c.cond ? "급등 시 중앙" : "유사 사례 중앙"})</small>${c.rng ? ` <small>(범위 ${c.rng[0] >= 0 ? "+" : ""}${c.rng[0]}% ~ +${c.rng[1]}%)</small>` : ""}${c.chg != null ? ` · 오늘 <span class="${c.chg >= 0 ? "up" : "dn"}">${c.chg >= 0 ? "+" : ""}${(+c.chg).toFixed(1)}%</span>` : ""}</div>
-      ${c.warn.length ? `<div class="en" style="color:#ff8f8f">⚠️ ${c.warn.map(esc).join(" · ")}</div>` : ""}
-      <div class="eh"><span>포착 엔진</span><span class="dots">${[0,1,2,3,4].map(k => `<i class="${k < c.n ? "f" : ""}"></i>`).join("")} ${c.n}/5</span></div>
-      <div class="eg">${EN.map(([k, ic]) => c.eng[k] ? `<div class="${cls(c.eng[k].rank)}">${ic} 포착<b>${c.eng[k].rank}위</b></div>` : Z.only && !Z.only.includes(k) ? `<div>${ic}<b style="font-size:10.5px;font-weight:400">대상외</b></div>` : `<div>${ic}<b>-</b></div>`).join("")}</div>
-      <div class="cd">${catchDetail(c, CH)}${tradeBlock(DATA.items.find(x => x.t === c.t)).replace('class="tp"', 'class="tp" style="margin:0 0 6px"')}
-        ${DATA.items.find(x => x.t === c.t) ? `<a class="go" href="#" onclick="openCard('${esc(c.t)}');return false">워치에서 전체 보기 →</a>` : ""}</div></div>`).join("")
-      || '<div class="empty">이 기간에 포착된 종목이 없어요</div>';
+    window.CL = L; window.CZ = Z;
+    h += `<div id="ccl"></div>`;
     $("#list").innerHTML = h;
+    catchFilter();
     return;
   }
   if (TAB === "sq"){
