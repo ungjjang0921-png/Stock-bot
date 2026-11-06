@@ -279,7 +279,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 </head>
 <body>
 <header>
-  <h1>🎯 펌핑 목적 워치리스트</h1>
+  <h1 style="display:flex;justify-content:space-between;align-items:center">🎯 펌핑 목적 워치리스트<span id="cur" onclick="toggleCur()" style="font-size:12px;font-weight:700;border:1px solid var(--line);border-radius:14px;padding:4px 10px;cursor:pointer;background:var(--panel)"></span></h1>
   <div class="sub" id="sub"></div>
   <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="surge">🚀 급등</span><span class="tab" data-v="jb">🎯 종배</span><span class="tab" data-v="catch">📡 포착</span><span class="tab" data-v="pred">🔮 예측</span><span class="tab" data-v="cal">📅 일정</span><span class="tab" data-v="sq">🩳 숏스퀴즈</span></div>
   <div class="controls" id="ctl">
@@ -309,7 +309,13 @@ const FILTERS = ["⭐관심","🔥오늘 급등","과매도","신저가","장중
 const keysOf = it => (it.snap && it.snap.keys) || [];
 const matches = (it, f) => f === "⭐관심" ? it.watch : f === "🔥오늘 급등" ? ((it.snap && it.snap.chg) || it.chg || 0) >= 20 : (it.tags.some(t => t.name === f) || keysOf(it).includes(f));
 const TK = t => esc(t);
-const pfmt = v => v == null ? "-" : (v < 1 ? v.toFixed(4) : v.toFixed(2));
+let CUR = "krw";
+try { CUR = localStorage.getItem("cur") || "krw"; } catch (e) {}
+const FX = () => (DATA && ((DATA.pred && DATA.pred.fx) || DATA.fx)) || null;
+const won = v => { const w = v * FX(); return (w >= 100 ? Math.round(w).toLocaleString() : w >= 10 ? w.toFixed(1) : w.toFixed(2)) + "원"; };
+const pfmt = v => v == null ? "-" : (CUR === "krw" && FX() ? won(v) : (v < 1 ? v.toFixed(4) : v.toFixed(2)));
+function toggleCur(){ CUR = CUR === "krw" ? "usd" : "krw"; try { localStorage.setItem("cur", CUR); } catch (e) {} curLabel(); render(); }
+function curLabel(){ const el = document.getElementById("cur"); if (el) el.textContent = !FX() ? "$ 달러" : CUR === "krw" ? "₩ 원화 ⇄ $" : "$ 달러 ⇄ ₩"; }
 function spark(s, sn){
   if (!s || !s.p || s.p.length < 3) return '<div class="note">장중 1분봉 데이터 없음 (장 시작 전이거나 거래 없음)</div>';
   const W = 320, H = 130, L = 2, R = 44, T = 6, B = 6;
@@ -374,8 +380,11 @@ const CK = {ma20:"20일선 이격 0~15%",lows:"최근 저점 상승",upvol:"상�
 let on = new Set();
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const usd = v => v == null ? "-" : (v < 1 ? "$" + v.toFixed(4) : "$" + v.toFixed(2));
-const big = v => v == null ? "-" : (Math.abs(v) >= 1e6 ? "$" + (v / 1e6).toFixed(2) + "M" : "$" + (v / 1e3).toFixed(0) + "K");
+const usd = v => v == null ? "-" : (CUR === "krw" && FX() ? won(v) : (v < 1 ? "$" + v.toFixed(4) : "$" + v.toFixed(2)));
+const big = v => { if (v == null) return "-";
+  if (CUR === "krw" && FX()) { const w = v * FX(), a = Math.abs(w);
+    return a >= 1e12 ? (w / 1e12).toFixed(2) + "조원" : a >= 1e8 ? (w / 1e8).toFixed(a >= 1e10 ? 0 : 1) + "억원" : Math.round(w / 1e4).toLocaleString() + "만원"; }
+  return Math.abs(v) >= 1e6 ? "$" + (v / 1e6).toFixed(2) + "M" : "$" + (v / 1e3).toFixed(0) + "K"; };
 const rwTxt = r => r == null ? "미확인" : r >= 99 ? "흑자" : r.toFixed(1) + "개월";
 const nearest = it => (it.ddays && it.ddays.length) ? it.ddays[0] : null;
 const upside = it => it.target ? (it.target / it.price - 1) * 100 : -1;
@@ -593,7 +602,7 @@ function render(){
     window.PH = window.PH || "10";
     const lab = {"1": "다음 거래일", "5": "5거래일", "10": "10거래일"};
     const z = hzs[PH];
-    const krw = v => P.fx && v ? Math.round(v * P.fx).toLocaleString() + "원" : "";
+    const krw = v => P.fx && v && CUR !== "krw" ? Math.round(v * P.fx).toLocaleString() + "원" : "";
     const m = (x, title, cls, sub) => !x || !x.n ? `<div class="${cls}"><h4>${title}</h4><div class="r">-</div><small>검증 데이터 부족</small></div>` :
       `<div class="${cls}"><h4>${title} <span style="float:right">${sub}</span></h4><div class="r">${x.rate}%</div>
        <small>적중 <b>${x.k}</b> / 평가 ${x.n}</small><small>95% 참고 구간 <b>${x.lo}% ~ ${x.hi}%</b></small>
@@ -788,6 +797,7 @@ $("#tabs").addEventListener("click", e => { const v = e.target.dataset.v; if (!v
 syncTabs();
 $("#q").addEventListener("input", render);
 $("#sort").addEventListener("change", render);
+curLabel();
 render();
 </script>
 </body>
