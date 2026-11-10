@@ -182,8 +182,13 @@ def universe() -> list[dict]:
              {"left": "type", "operation": "in_range", "right": ["stock", "dr"]},
              {"left": "close", "operation": "in_range", "right": [MIN_PRICE, GAINER_MAX_PRICE]},
              {"left": "volume", "operation": "greater", "right": 300_000}]
-    sess_chg = ext_mode()[1]
+    mode, sess_chg = ext_mode()
+    if mode != "reg":                    # 프장·애프터엔 그 시간대 거래량으로 거름 (정규장 거래량 적은 신규·소형주도 잡게)
+        gbase[-1] = {"left": "premarket_volume" if mode == "pre" else "postmarket_volume",
+                     "operation": "greater", "right": 30_000}
     gain = tv_scan(gbase, sess_chg, GAINER_TOP) or tv_scan(gbase, "change", GAINER_TOP)
+    if mode != "reg":                    # 오늘 본장 상승률 상위도 같이 (프장 땐 전날, 애프터 땐 오늘 본장)
+        gain += tv_scan(gbase[:3] + [{"left": "volume", "operation": "greater", "right": 300_000}], "change", 30)
     rows += [r for r in gain if r["mcap"] is None or r["mcap"] <= GAINER_MAX_MCAP]
     watch = watch_tickers()
     if watch:   # 텔레그램 관심종목은 조건과 무관하게 포함
