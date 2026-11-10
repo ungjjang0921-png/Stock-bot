@@ -21,8 +21,8 @@ log = logging.getLogger("catch")
 
 TOP = 20                       # 엔진별 상위 몇 개를 '포착'으로 볼지
 HIT = {"0": 15, "1": 20}       # 적중 기준: 오늘(진입가 대비 당일 고가 +15%), 1거래일(종가 대비 다음날 고가 +20%)
-ENG = ["preview", "signal", "best", "burn", "squeeze"]
-ENG_KO = {"preview": "프리뷰", "signal": "시그널", "best": "베스트", "burn": "버닝업", "squeeze": "스퀴즈"}
+ENG = ["preview", "ext", "signal", "best", "burn", "squeeze"]
+ENG_KO = {"preview": "프리뷰", "ext": "시간외", "signal": "시그널", "best": "베스트", "burn": "버닝업", "squeeze": "스퀴즈"}
 
 
 def _risk(it: dict) -> list[str]:
@@ -30,10 +30,31 @@ def _risk(it: dict) -> list[str]:
     return [n for n in ("부도 위험", "ATM·공모", "공모 준비", "물량 출회") if n in names]
 
 
-def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool) -> dict:
+def ext_engine(ext: dict, by: dict, S1: dict) -> list:
+    """🌅 프장 / 🌙 애프터·데이장 대비: 시간외 상승률 × 거래량 + 모델 점수 (오른 뒤 밀린 종목은 감점)"""
+    rows = []
+    for r in (ext or {}).get("rows") or []:
+        pre = ext["mode"] == "pre"
+        chg = r.get("pre_chg") if pre else r.get("post_chg")
+        vol = (r.get("pre_vol") if pre else r.get("post_vol")) or 0
+        px = (r.get("pre_px") if pre else r.get("post_px")) or r.get("price")
+        if chg is None or chg < 5 or vol < 30_000 or not px:
+            continue
+        it = by.get(r["t"])
+        if it and "부도 위험" in _risk(it):
+            continue
+        p = (S1.get(r["t"]) or {}).get("p", 50)
+        s = min(chg, 150) * (1 + np.log10(max(vol, 1e4) / 1e5) * 0.3) + p * 0.3
+        rows.append((s, r["t"], {"chg": round(chg, 1), "vol": int(vol), "px": px, "p": round(p, 1),
+                                 "mode": ext["mode"], "name": r.get("name", ""), "fl": r.get("float")}))
+    return rows
+
+
+def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, ext: dict | None = None) -> dict:
     by = {it["t"]: it for it in items}
     sc = (pred or {}).get("scores") or {}
-    out = {"live": live, "hz": {}}
+    out = {"live": live, "hz": {}, "mode": (ext or {}).get("mode", "reg")}
+    xrows = ext_engine(ext, by, sc.get("1") or {})
     for hz in ("0", "1", "5", "10"):
         H = "1" if hz == "0" else hz
         S = sc.get(H) or {}
@@ -54,11 +75,15 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool) 
                 if vw and it["price"] < vw * 0.98:
                     continue
                 s = pr + 0.5 * min(chg, 100) + 4 * min(rv, 10)
-                rows.append((s, it["t"], {"reg": round(pr, 1), "pre": pb.get("pre"), "chg": round(chg, 1),
+                rows.append((s, it["t"], {"reg": round(pr, 1), "pre": round(pb["pre"], 1) if pb.get("pre") is not None else None, "chg": round(chg, 1),
                                           "vwap": bool(vw and it["price"] >= vw), "rv": round(rv, 1) if rv else None}))
             eng["preview"] = rows
-        if hz == "0":                      # 오늘 탭은 장중 엔진(프리뷰)만 — RabbitStock과 같은 방식
-            _finish(out, hz, eng, by, S, sc)
+        if xrows and hz in ("0", "1"):     # 프장·애프터(데이장 대비) 급등
+            eng["ext"] = xrows
+        if hz == "0":                      # 오늘 탭은 장중·시간외 엔진만 — RabbitStock과 같은 방식
+            if out["mode"] == "night":     # 밤(애프터·데이장)엔 낮 장중 흐름이 끝났으니 시간외 엔진만
+                eng.pop("preview", None)
+            _finish(out, hz, eng, by, S, sc, xrows)
             continue
         # 📈 시그널 — 모델 백분위
         rows = []
@@ -96,11 +121,11 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool) 
         # 🩳 스퀴즈
         eng["squeeze"] = [(c["score"], c["t"], {"score": c["score"], "si": c.get("si"), "fee": c.get("fee"),
                                                  "st": c.get("st")}) for c in (squeeze or [])]
-        _finish(out, hz, eng, by, S, sc)
+        _finish(out, hz, eng, by, S, sc, xrows)
     return out
 
 
-def _finish(out, hz, eng, by, S, sc):
+def _finish(out, hz, eng, by, S, sc, xrows=None):
     # 엔진별 순위 → 종목별 합치기
     cat = {}
     for k, rows in eng.items():
@@ -111,7 +136,8 @@ def _finish(out, hz, eng, by, S, sc):
     for t, e in cat.items():
         it = by.get(t) or {}
         r = S.get(t) or {}
-        px = it.get("price") or r.get("px")
+        xe = e.get("ext") or {}
+        px = xe.get("px") or it.get("price") or r.get("px")     # 시간외 포착은 시간외 가격이 진입가
         if not px:
             continue
         # 예상가: 버닝업 유사 급등 중앙값 → 베스트 유사 사례 중앙값 → 시그널 분포 중앙값
@@ -125,13 +151,13 @@ def _finish(out, hz, eng, by, S, sc):
         if sn.get("vwap") and px < sn["vwap"] and (sn.get("chg") or 0) > 20:
             warn.append("급등 후 VWAP 아래")
         ranks = [v["rank"] for v in e.values()]
-        lst.append({"t": t, "name": it.get("name", ""), "px": px, "exp": px * (1 + mid / 100) if mid else None,
+        lst.append({"t": t, "name": it.get("name", "") or xe.get("name", ""), "px": px, "exp": px * (1 + mid / 100) if mid else None,
                     "up": mid, "cond": bool(r.get("cq") or (e.get("burn") or {}).get("q")), "rng": [q[0], q[2]] if q else None, "n": len(e), "avg": round(float(np.mean(ranks)), 1),
-                    "eng": e, "warn": warn, "pat": r.get("pat"), "chg": sn.get("chg", r.get("ret1")),
+                    "eng": e, "warn": warn, "pat": r.get("pat"), "chg": xe.get("chg", sn.get("chg", r.get("ret1"))),
                     "focus": (len(e) >= 3 or (hz == "0" and e.get("preview", {}).get("rank", 99) <= 5)) and not warn})
     lst.sort(key=lambda x: (-x["n"], x["avg"]))
     out["hz"][hz] = {"list": lst[:60], "counts": {k: min(len(v), TOP) for k, v in eng.items()},
-                     "only": ["preview"] if hz == "0" else None}
+                     "only": (["preview", "ext"] if hz == "0" else None)}
 
 
 # ── 고정 기록과 적중률 ──
@@ -144,6 +170,14 @@ def ledger(cat: dict, prices: dict, path: Path, now_et: datetime, session_day: d
         for c in cat["hz"].get("0", {}).get("list", [])[:30]:
             book.append({"day": session_day.isoformat(), "hz": "0", "t": c["t"], "ref": c["px"], "n": c["n"],
                          "eng": {k: v["rank"] for k, v in c["eng"].items()}, "warn": bool(c["warn"]), "res": None})
+    # 프장: 08:30~09:30 첫 실행에 고정 → 그날 정규장 고가로 채점 / 데이장: 20:00~03:59 → 다음 정규장 고가로 채점
+    for key, ok in (("p", dtime(8, 30) <= t_ < dtime(9, 30)), ("n", t_ >= dtime(20, 0) or t_ < dtime(4, 0))):
+        day = session_day.isoformat()
+        if ok and now_et.weekday() != 5 and (day, key) not in have:
+            for c in cat["hz"].get("0", {}).get("list", [])[:30]:
+                book.append({"day": day, "hz": key, "t": c["t"], "ref": c["px"], "n": c["n"],
+                             "eng": {k: v["rank"] for k, v in c["eng"].items()}, "warn": bool(c["warn"]), "res": None,
+                             "after": t_ >= dtime(20, 0)})
     # 1거래일: 장 마감 뒤 첫 실행에 고정 (진입가 = 종가) → 다음 거래일 고가로 채점
     if now_et.weekday() < 5 and t_ >= dtime(16, 5) and (session_day.isoformat(), "1") not in have:
         for c in cat["hz"].get("1", {}).get("list", [])[:30]:
@@ -157,11 +191,16 @@ def ledger(cat: dict, prices: dict, path: Path, now_et: datetime, session_day: d
         if df is None or not len(df):
             continue
         d0 = date.fromisoformat(e["day"])
-        if e["hz"] == "0":
+        if e["hz"] in ("0", "p") or (e["hz"] == "n" and not e.get("after")):
             row = df[[ts.date() == d0 for ts in df.index]]
             if len(row) and (now_et.date() > d0 or t_ >= dtime(16, 30)):
                 hi = float(row["High"].iloc[0])
                 e["hi"] = round((hi / e["ref"] - 1) * 100, 1)
+                e["res"] = e["hi"] >= HIT["0"]
+        elif e["hz"] == "n":                                   # 20시 이후 고정 → 다음 정규장
+            nxt = df[[ts.date() > d0 for ts in df.index]]
+            if len(nxt) and (nxt.index[0].date() < now_et.date() or t_ >= dtime(16, 30)):
+                e["hi"] = round((float(nxt["High"].iloc[0]) / e["ref"] - 1) * 100, 1)
                 e["res"] = e["hi"] >= HIT["0"]
         else:
             nxt = df[[ts.date() > d0 for ts in df.index]]
@@ -173,7 +212,7 @@ def ledger(cat: dict, prices: dict, path: Path, now_et: datetime, session_day: d
     path.write_text(json.dumps(book, ensure_ascii=False), encoding="utf-8")
     # 적중률: 엔진별 · 겹친 엔진 수별 (최근 20거래일)
     st = {}
-    for hz in ("0", "1"):
+    for hz in ("0", "p", "n", "1"):
         xs = [e for e in book if e["hz"] == hz and e["res"] is not None]
         days = sorted({e["day"] for e in xs})[-20:]
         xs = [e for e in xs if e["day"] in days]
@@ -183,5 +222,5 @@ def ledger(cat: dict, prices: dict, path: Path, now_et: datetime, session_day: d
                   "eng": {k: rate([e for e in xs if k in e["eng"] and e["eng"][k] <= 10]) for k in ENG},
                   "by_n": {str(n): rate([e for e in xs if (e["n"] >= 3 if n == 3 else e["n"] == n)]) for n in (1, 2, 3)},
                   "focus": rate([e for e in xs if e["n"] >= 3 and not e["warn"]]),
-                  "th": HIT[hz]}
+                  "th": HIT.get(hz, HIT["0"])}
     return st

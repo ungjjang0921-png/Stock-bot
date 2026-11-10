@@ -104,7 +104,9 @@ def sig(v, n=5):
 
 # ───────────────── 1. 종목 수집 ─────────────────
 REQ_COLS = ["description", "close", "change", "average_volume_10d_calc", "volume"]
-OPT_COLS = ["market_cap_basic", "float_shares_outstanding", "bid", "ask"]
+OPT_COLS = ["market_cap_basic", "float_shares_outstanding", "bid", "ask",
+            "premarket_change", "premarket_close", "premarket_volume",
+            "postmarket_change", "postmarket_close", "postmarket_volume"]
 
 
 def tv_scan(filters: list, sort: str, n: int, tickers: list[str] | None = None) -> list[dict]:
@@ -125,12 +127,40 @@ def tv_scan(filters: list, sort: str, n: int, tickers: list[str] | None = None) 
                             "price": num(d.get("close")), "chg": num(d.get("change")),
                             "vol": num(d.get("volume")), "avgvol": num(d.get("average_volume_10d_calc")),
                             "mcap": num(d.get("market_cap_basic")), "float": num(d.get("float_shares_outstanding")),
-                            "bid": num(d.get("bid")), "ask": num(d.get("ask"))})
+                            "bid": num(d.get("bid")), "ask": num(d.get("ask")),
+                            "pre_chg": num(d.get("premarket_change")), "pre_px": num(d.get("premarket_close")),
+                            "pre_vol": num(d.get("premarket_volume")),
+                            "post_chg": num(d.get("postmarket_change")), "post_px": num(d.get("postmarket_close")),
+                            "post_vol": num(d.get("postmarket_volume"))})
             return out
         except Exception as e:
             log.warning("스캐너 실패 (%s): %s", "전체컬럼" if cols != REQ_COLS else "필수컬럼", e)
             time.sleep(2)
     return []
+
+
+def ext_mode(now=None) -> tuple[str, str]:
+    """지금 세션 → (모드, TradingView 정렬 컬럼). 프장 04~09:30 / 정규 09:30~16 / 애프터·데이장 16~04 (미국 동부)"""
+    t = (now or datetime.now(ET)).time()
+    if dtime(4, 0) <= t < dtime(9, 30):
+        return "pre", "premarket_change"
+    if dtime(9, 30) <= t < dtime(16, 0):
+        return "reg", "change"
+    return "night", "postmarket_change"
+
+
+def ext_movers() -> dict:
+    """프장·애프터(데이장 대비) 급등 종목 — 소형주(주가 $20·시총 $5억 이하)"""
+    mode, col = ext_mode()
+    if mode == "reg":
+        return {"mode": mode, "rows": []}
+    vcol = "premarket_volume" if mode == "pre" else "postmarket_volume"
+    f = [{"left": "exchange", "operation": "in_range", "right": EXCHANGES},
+         {"left": "type", "operation": "in_range", "right": ["stock", "dr"]},
+         {"left": "close", "operation": "in_range", "right": [MIN_PRICE, GAINER_MAX_PRICE]},
+         {"left": vcol, "operation": "greater", "right": 30_000}]
+    rows = [r for r in tv_scan(f, col, 50) if (r["mcap"] is None or r["mcap"] <= GAINER_MAX_MCAP)]
+    return {"mode": mode, "rows": rows}
 
 
 def watch_tickers() -> list[str]:
@@ -152,7 +182,7 @@ def universe() -> list[dict]:
              {"left": "type", "operation": "in_range", "right": ["stock", "dr"]},
              {"left": "close", "operation": "in_range", "right": [MIN_PRICE, GAINER_MAX_PRICE]},
              {"left": "volume", "operation": "greater", "right": 300_000}]
-    sess_chg = "premarket_change" if datetime.now(ET).time() < dtime(9, 30) else "change"
+    sess_chg = ext_mode()[1]
     gain = tv_scan(gbase, sess_chg, GAINER_TOP) or tv_scan(gbase, "change", GAINER_TOP)
     rows += [r for r in gain if r["mcap"] is None or r["mcap"] <= GAINER_MAX_MCAP]
     watch = watch_tickers()
@@ -2155,6 +2185,106 @@ def deep_analysis(it: dict, df: pd.DataFrame | None, fs: list, fin: dict, today:
     return out
 
 
+# ── 중요 가격: 공시 원문에서 공모가·행사가·전환가·하한가·매입가를 뽑고, 이후 주식병합을 반영 ──
+KL_FORMS = ("424B4", "424B5", "424B3", "424B7", "424B2", "S-1", "S-1/A", "F-1", "F-1/A", "S-3", "10-Q", "10-K", "20-F")
+KL_PATS = [
+    ("공모가", "과거 발행가", r"(?:public offering price|offering price|price to the public)"),
+    ("행사가", "워런트", r"exercise price"),
+    ("전환가", "전환 조건", r"conversion price"),
+    ("하한가", "계약 하한", r"floor price"),
+    ("매입가", "ELOC·PIPE", r"(?:per share purchase price|purchase price per share|purchase price)"),
+    ("리셋가", "조정 조항", r"reset price"),
+]
+KL_SKIP = ("par value", "minimum bid", "bid price requirement", "$1.00 per share minimum", "nasdaq listing rule")
+
+
+def _kl_scan(text: str) -> list[dict]:
+    out = []
+    low = text.lower()
+    for kind, badge, pat in KL_PATS:
+        for m in re.finditer(pat + r"[^$%;]{0,50}?\$\s?([\d,]*\.?\d+)", low):
+            try:
+                v = float(m.group(1).replace(",", ""))
+            except ValueError:
+                continue
+            ctx = text[max(0, m.start() - 90): m.end() + 70].replace("\n", " ")
+            near = low[max(0, m.start() - 50): m.end()]
+            if v <= 0 or v > 5000 or any(k in near for k in KL_SKIP):
+                continue
+            out.append({"kind": kind, "badge": badge, "px": v, "ctx": re.sub(r"\s+", " ", ctx).strip()[:220]})
+    seen, res = set(), []
+    for x in out:
+        k = (x["kind"], round(x["px"], 4))
+        if k not in seen:
+            seen.add(k)
+            res.append(x)
+    return res[:6]
+
+
+def _kl_split(fs: list) -> list[tuple[str, int]]:
+    """8-K 주식병합 공시 → [(날짜, 병합비율)]"""
+    c = pcache("splits")
+    out = []
+    for f in fs:
+        if not f["form"].startswith("8-K") or not any(x in (f.get("items") or "") for x in ("5.03", "3.03", "8.01")):
+            continue
+        acc = _acc(f["url"])
+        if acc not in c:
+            txt = html_to_text(sec_text(f["url"], 300000)).lower()
+            m = re.search(r"reverse (?:stock )?split[^.]{0,200}?1[- ]for[- ](\d+)|1[- ]for[- ](\d+)[^.]{0,80}reverse (?:stock )?split", txt)
+            c[acc] = int(m.group(1) or m.group(2)) if m else 0
+        if c[acc] and c[acc] > 1:
+            out.append((f["date"], c[acc]))
+    return out
+
+
+def key_levels(it: dict, fs: list, today: date) -> list[dict]:
+    p = it.get("price") or 0
+    c = pcache("kl")
+    lv = []
+    picked = [f for f in fs if days_ago(f["date"], today) <= 400 and (
+        f["form"] in KL_FORMS or (f["form"].startswith("8-K") and any(x in (f.get("items") or "") for x in ("1.01", "3.02"))))]
+    q10 = [f for f in picked if f["form"] in ("10-Q", "10-K", "20-F")][:1]       # 정기보고서는 최신 1개만
+    picked = [f for f in picked if f["form"] not in ("10-Q", "10-K", "20-F")][:7] + q10
+    for f in picked:
+        acc = _acc(f["url"])
+        if acc not in c:
+            if time_left() < 220:
+                break
+            c[acc] = _kl_scan(html_to_text(sec_text(f["url"], 1_500_000)))
+        for x in c[acc]:
+            lv.append(dict(x, date=f["date"], form=f["form"], url=f["url"]))
+    splits = _kl_split(fs)
+    for x in lv:                                   # 공시 뒤에 병합했으면 가격 × 비율
+        mul = 1
+        for d, r in splits:
+            if d > x["date"]:
+                mul *= r
+        x["adj"] = mul
+        x["px_adj"] = x["px"] * mul
+    d = it.get("deep") or {}
+    b = d.get("baby") or {}
+    if b.get("active") and b.get("escape"):
+        lv.append({"kind": "탈출가", "badge": "가정 계산", "px": b["escape"], "px_adj": b["escape"], "adj": 1,
+                   "ctx": f"유통 주식 × 주가가 $75M을 넘는 가격 — 넘으면 baby shelf(1년 증자 한도 = 유통 시총의 1/3)가 풀림",
+                   "date": today.isoformat(), "form": "계산", "url": ""})
+    for x in d.get("inst") or []:
+        if x.get("price"):
+            lv.append({"kind": x["kind"], "badge": "AI 공시 판독", "px": x["price"], "px_adj": x["price"], "adj": 1,
+                       "ctx": " · ".join(v for v in [x.get("holder") or "", f"{x['qty'] / 1e6:.1f}M주" if x.get("qty") else "",
+                                                     "잠김" if x.get("locked") else "출회 가능", x.get("note") or ""] if v),
+                       "date": "", "form": "AI", "url": ""})
+    seen, out = set(), []
+    for x in sorted(lv, key=lambda x: x["date"], reverse=True):
+        k = (x["kind"], round(x["px_adj"], 3))
+        if k in seen or not (p * 0.05 < x["px_adj"] < p * 30 if p else True):
+            continue
+        seen.add(k)
+        x["pct"] = round((x["px_adj"] / p - 1) * 100, 1) if p else None
+        out.append(x)
+    return sorted(out, key=lambda x: -x["px_adj"])[:12]
+
+
 def run_deep(items: list, pred: dict | None, today: date):
     t0 = time.time()
     pick = [it for it in items if it.get("watch")]
@@ -2173,6 +2303,10 @@ def run_deep(items: list, pred: dict | None, today: date):
             _, fin = sec_cached(it.get("cik"))
             it["deep"] = deep_analysis(it, PRICES.get(it["t"]), fs, fin, today)
             it["deep"]["holders"] = holders(fs, it["name"], today)
+            try:
+                it["deep"]["levels"] = key_levels(it, fs, today)
+            except Exception as e:
+                log.warning("%s 중요 가격 실패: %s", it["t"], e)
             done += 1
         except Exception as e:
             log.warning("%s 심층 분석 실패: %s", it["t"], e)
@@ -2442,12 +2576,16 @@ def main():
     try:                                            # 📡 포착: 5개 엔진 합의
         import catch as catchmod
         now_et = datetime.now(ET)
-        live = now_et.weekday() < 5 and dtime(4, 0) <= now_et.time() < dtime(20, 0)
-        CATCH = catchmod.build(items, PRED, SQUEEZE, now_et, live)
+        live = True
+        try:
+            EXT = ext_movers()
+        except Exception as e:
+            log.warning("시간외 급등 조회 실패: %s", e)
+            EXT = {"mode": ext_mode()[0], "rows": []}
+        CATCH = catchmod.build(items, PRED, SQUEEZE, now_et, live, EXT)
         CATCH["stat"] = catchmod.ledger(CATCH, PRICES, OUT.parent / "catch_log.json", now_et, now_et.date())
         CATCH["at"] = now_et.strftime("%m/%d %H:%M ET")
-        CATCH["sess"] = ("프리장" if now_et.time() < dtime(9, 30) else "정규장" if now_et.time() < dtime(16, 0)
-                         else "애프터") if live else "장 마감"
+        CATCH["sess"] = {"pre": "프리장", "reg": "정규장", "night": "애프터·데이장"}[ext_mode(now_et)[0]]
     except Exception as e:
         log.exception("포착 엔진 실패: %s", e)
     try:
