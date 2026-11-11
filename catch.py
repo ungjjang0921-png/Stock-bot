@@ -30,9 +30,15 @@ def _risk(it: dict) -> list[str]:
     return [n for n in ("부도 위험", "ATM·공모", "공모 준비", "물량 출회") if n in names]
 
 
+RISKY_EXT = ("부도 위험", "ATM·공모", "공모 준비", "물량 출회")
+
+
 def ext_engine(ext: dict, by: dict, S1: dict) -> list:
-    """🌅 프장 / 🌙 애프터·데이장 대비: 시간외 상승률 × 거래량 + 모델 점수 (오른 뒤 밀린 종목은 감점)"""
-    rows = []
+    """🌅 프장 / 🌙 애프터·데이장 대비 급등 — 설거지 거르기:
+    · 증자·ATM·물량 출회·부도 위험 종목은 순위에서 뺌 (주의 목록으로만)
+    · 시간외 고점 대비 12% 이상 밀렸으면 뺌 (이미 꺾임)
+    · 고점 바로 옆에서 크게 오른 상태면 감점하고 '눌림 진입가'를 따로 줌"""
+    rows, skip = [], []
     for r in (ext or {}).get("rows") or []:
         pre = ext["mode"] == "pre"
         chg = r.get("pre_chg") if pre else r.get("post_chg")
@@ -40,13 +46,28 @@ def ext_engine(ext: dict, by: dict, S1: dict) -> list:
         px = (r.get("pre_px") if pre else r.get("post_px")) or r.get("price")
         if chg is None or chg < 5 or vol < 30_000 or not px:
             continue
-        it = by.get(r["t"])
-        if it and "부도 위험" in _risk(it):
+        it = by.get(r["t"]) or {}
+        rk = [x for x in _risk(it) if x in RISKY_EXT]
+        base = px / (1 + chg / 100)                                   # 전일 종가
+        hi = r.get("hi") or (it.get("snap") or {}).get("day_hi")
+        hi = max(hi, px) if hi else px
+        fade = (1 - px / hi) * 100
+        if rk:
+            skip.append({"t": r["t"], "chg": round(chg, 1), "why": " · ".join(rk) + " — 오르면 물량 나올 수 있음"})
+            continue
+        if fade >= 12:
+            skip.append({"t": r["t"], "chg": round(chg, 1), "why": f"시간외 고점 대비 -{fade:.0f}% 밀림 — 이미 꺾임"})
             continue
         p = (S1.get(r["t"]) or {}).get("p", 50)
         s = min(chg, 150) * (1 + np.log10(max(vol, 1e4) / 1e5) * 0.3) + p * 0.3
+        chase = chg >= 50 and fade < 4
+        if chase:
+            s *= 0.6
+        pull = base * (1 + (hi / base - 1) * 0.5)                      # 오른 폭의 절반 되돌림
         rows.append((s, r["t"], {"chg": round(chg, 1), "vol": int(vol), "px": px, "p": round(p, 1),
-                                 "mode": ext["mode"], "name": r.get("name", ""), "fl": r.get("float")}))
+                                 "mode": ext["mode"], "name": r.get("name", ""), "fl": r.get("float"),
+                                 "hi": hi, "fade": round(fade, 1), "chase": chase, "pull": pull}))
+    ext["skip"] = skip[:15] if ext else []
     return rows
 
 
@@ -55,6 +76,7 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, 
     sc = (pred or {}).get("scores") or {}
     out = {"live": live, "hz": {}, "mode": (ext or {}).get("mode", "reg")}
     xrows = ext_engine(ext, by, sc.get("1") or {})
+    out["skip"] = (ext or {}).get("skip", [])
     for hz in ("0", "1", "5", "10"):
         H = "1" if hz == "0" else hz
         S = sc.get(H) or {}
@@ -153,9 +175,10 @@ def _finish(out, hz, eng, by, S, sc, xrows=None):
         ranks = [v["rank"] for v in e.values()]
         lst.append({"t": t, "name": it.get("name", "") or xe.get("name", ""), "px": px, "exp": px * (1 + mid / 100) if mid else None,
                     "up": mid, "cond": bool(r.get("cq") or (e.get("burn") or {}).get("q")), "rng": [q[0], q[2]] if q else None, "n": len(e), "avg": round(float(np.mean(ranks)), 1),
+                    "pull": xe.get("pull") if xe.get("chase") else None, "hi": xe.get("hi"),
                     "eng": e, "warn": warn, "pat": r.get("pat"), "chg": xe.get("chg", sn.get("chg", r.get("ret1"))),
                     "focus": (len(e) >= 3 or (hz == "0" and e.get("preview", {}).get("rank", 99) <= 5)) and not warn})
-    lst.sort(key=lambda x: (-x["n"], x["avg"]))
+    lst.sort(key=lambda x: (bool(x["warn"]), -x["n"], x["avg"]))     # 경고 붙은 종목은 아래로
     out["hz"][hz] = {"list": lst[:60], "counts": {k: min(len(v), TOP) for k, v in eng.items()},
                      "only": (["preview", "ext"] if hz == "0" else None)}
 

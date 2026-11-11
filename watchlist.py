@@ -160,6 +160,18 @@ def ext_movers() -> dict:
          {"left": "close", "operation": "in_range", "right": [MIN_PRICE, GAINER_MAX_PRICE]},
          {"left": vcol, "operation": "greater", "right": 30_000}]
     rows = [r for r in tv_scan(f, col, 50) if (r["mcap"] is None or r["mcap"] <= GAINER_MAX_MCAP)]
+    # 시간외 고가 (고점 대비 얼마나 밀렸나 — 설거지 거르기용). 컬럼이 없으면 그냥 넘어감
+    hcol = "premarket_high" if mode == "pre" else "postmarket_high"
+    try:
+        body = {"markets": ["america"], "columns": [hcol], "range": [0, len(rows)],
+                "symbols": {"query": {"types": []}, "tickers": [f"{ex}:{r['t'].replace('-', '.')}" for r in rows
+                                                               for ex in ("NASDAQ", "NYSE", "AMEX")]}}
+        data = http.post("https://scanner.tradingview.com/america/scan", json=body, headers=UA_WEB, timeout=20).json()
+        hi = {row["s"].split(":")[-1].replace(".", "-"): num(row["d"][0]) for row in data.get("data", [])}
+        for r in rows:
+            r["hi"] = hi.get(r["t"])
+    except Exception as e:
+        log.warning("시간외 고가 조회 실패: %s", e)
     return {"mode": mode, "rows": rows}
 
 
