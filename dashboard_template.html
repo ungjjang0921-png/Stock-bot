@@ -457,10 +457,29 @@ function card(it, i){
   </article>`;
 }
 
-let HOTON = false;
+let HOTON = false, LIVE = null;
+const liveAge = () => LIVE ? Math.round((Date.now() / 1000 - LIVE.ts) / 60) : 999;
+async function pollLive(){
+  if (!location.protocol.startsWith("http") || document.hidden) return;
+  try { const r = await fetch("live.json?" + Date.now(), {cache: "no-store"}); if (r.ok){ LIVE = await r.json(); renderHot(); liveBox(); } } catch (e) {}
+}
+function liveRows(n){
+  const has = new Set(DATA.items.map(it => it.t));
+  const ml = {pre: "프장", reg: "정규장", post: "애프터"}[LIVE.mode] || "";
+  return LIVE.rows.slice(0, n).map(r => `<div class="hr" onclick="${has.has(r[0]) ? `openCard('${esc(r[0])}')` : `window.open('https://www.tradingview.com/symbols/${esc(r[0])}/','_blank')`}"><b>${esc(r[0])}${has.has(r[0]) ? "" : " ↗"}</b><span>${esc((r[1] || "").slice(0, 20))} · ${ml} ${(r[4] / 1e6).toFixed(1)}M주${r[5] ? " · 유통 " + (r[5] / 1e6).toFixed(1) + "M" : ""}</span><em>${usd(r[2])}</em><i class="up">+${r[3]}%</i></div>`).join("");
+}
+function liveBox(){
+  const box = document.getElementById("livebox"); if (!box) return;
+  if (!LIVE || liveAge() > 40 || !LIVE.rows.length){ box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="hot"><div class="hh">⚡ 실시간 급등 <small>${{pre: "프장", reg: "정규장", post: "애프터"}[LIVE.mode] || ""} +5% 이상 · ${liveAge()}분 전 (10분마다) · ↗ = 아직 분석 전</small></div>${liveRows(15)}</div>`;
+}
 function renderHot(){
   const box = document.getElementById("hotbox"); if (!box) return;
   if (!HOTON){ box.innerHTML = ""; return; }
+  if (LIVE && liveAge() <= 40 && LIVE.rows.length){
+    box.innerHTML = `<div class="hot"><div class="hh">🔥 지금 급등 중 <small>${{pre: "프장", reg: "정규장", post: "애프터"}[LIVE.mode] || ""} 실시간 · ${liveAge()}분 전 · ↗ = 아직 분석 전</small></div>${liveRows(10)}</div>`;
+    return;
+  }
   const chgOf = it => (it.snap && it.snap.chg != null) ? it.snap.chg : (it.chg || 0);
   const rows = DATA.items.filter(it => chgOf(it) >= 15).sort((a, b) => chgOf(b) - chgOf(a)).slice(0, 10);
   if (!rows.length){ box.innerHTML = ""; return; }
@@ -769,6 +788,7 @@ function render(){
         전체 ${r(S.all)} · 엔진 1개 ${r(S.by_n["1"])} · 2개 ${r(S.by_n["2"])} · <b>3개 이상 ${r(S.by_n["3"])}</b> · 🎯 ${r(S.focus)}<br>
         <span style="color:var(--muted)">엔진별(10위 안): ${EN.map(([k, , n]) => `${n} ${S.eng[k] && S.eng[k].n ? S.eng[k].r + "%" : "-"}`).join(" · ")}</span></div>`;
     } else if (CH === "0" || CH === "1") h += `<div class="cst" style="color:var(--muted)">📊 ${CH === "0" ? (C.mode === "pre" ? "프장 목록은 미국 08:30~09:30 사이" : C.mode === "night" ? "데이장 대비 목록은 애프터 이후(미국 20시~새벽 4시)" : "오늘 탭은 정규장 시작 15분 뒤") : "1거래일 탭은 장 마감 뒤"} 목록을 고정해서 실제 결과로 엔진별 적중률을 매겨요. 며칠 쌓이면 여기에 성적이 나와요.</div>`;
+    if (CH === "0") h += `<div id="livebox"></div>`;
     if (CH === "0") h += `<div class="cst" style="color:var(--muted)">${C.mode === "pre" ? "🌅 <b style=\"color:var(--text)\">프리장 포착</b> — 지금 프리장에서 +5% 이상 오르고 거래량이 붙은 종목(🌙 시간외 엔진)과, 비슷한 프리장 상황에서 +10%를 친 비율이 높은 종목(👁 프리뷰)을 같이 봐요. 본장 시작 전 한 번(미국 08:30~09:30) 목록을 고정해서 본장 고가로 채점해요."
       : C.mode === "night" ? "🌙 <b style=\"color:var(--text)\">데이장·다음 프장 대비 포착</b> — 애프터에서 +5% 이상 오르고 거래량이 붙은 종목을 시간외 엔진이 골라요. 한국 낮 데이장(주간거래)과 저녁 프장에서 이어질 후보예요. 데이장 실시간 가격은 무료로 받을 수 있는 곳이 없어서 애프터 마감가를 진입가로 써요."
       : "오늘 탭은 RabbitStock처럼 <b style=\"color:var(--text)\">장중 엔진(프리뷰)만</b> 순위를 매겨요. 오늘 +3% 이상 오르고 VWAP 위에 있는 종목 중, 비슷한 장중 상황에서 +20%를 친 비율·당일 상승·거래량으로 줄 세워요."}</div>`;
@@ -782,7 +802,7 @@ function render(){
     window.CL = L; window.CZ = Z;
     h += `<div id="ccl"></div>`;
     $("#list").innerHTML = h;
-    catchFilter();
+    catchFilter(); liveBox();
     return;
   }
   if (TAB === "sq"){
@@ -856,6 +876,7 @@ syncTabs();
 $("#q").addEventListener("input", render);
 $("#sort").addEventListener("change", render);
 curLabel();
+setTimeout(pollLive, 300); setInterval(pollLive, 60000);
 render();
 </script>
 </body>
