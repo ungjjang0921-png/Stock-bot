@@ -20,6 +20,13 @@ input,select{flex:1;min-width:0;background:var(--panel);border:1px solid var(--l
 select{flex:0 0 auto;max-width:46%}
 .chips{display:flex;gap:6px;overflow-x:auto;margin-top:8px;padding-bottom:2px;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
+.ntc-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;display:flex;align-items:center;justify-content:center;padding:16px}
+.ntc{background:var(--panel);border:1px solid var(--line);border-radius:16px;max-width:420px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+.ntc h3{margin:0;padding:14px 16px;font-size:16px;border-bottom:1px solid var(--line)}
+.ntc .nb{padding:14px 16px;overflow-y:auto;font-size:13.5px;line-height:1.7;white-space:pre-wrap}
+.ntc .nf{display:flex;border-top:1px solid var(--line)}
+.ntc .nf span{flex:1;text-align:center;padding:12px 0;cursor:pointer;font-size:13.5px}
+.ntc .nf span+span{border-left:1px solid var(--line);font-weight:800;color:var(--accent)}
 .kpc{background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-bottom:10px;overflow:hidden}
 .kpc .kh{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;cursor:pointer}
 .kpc .kh b{font-size:15.5px}.kpc .kh small{color:var(--muted);font-size:11px;display:block}
@@ -855,7 +862,28 @@ $("#tabs").addEventListener("click", e => { const v = e.target.dataset.v; if (!v
 syncTabs();
 $("#q").addEventListener("input", render);
 $("#sort").addEventListener("change", render);
+// ── 공지 팝업: docs/notice.json 이 있고 "on": true 면 들어올 때 한 번 띄움 ──
+async function showNotice(){
+  if (!location.protocol.startsWith("http")) return;
+  let n;
+  try { const r = await fetch("notice.json?" + Date.now(), {cache: "no-store"}); if (!r.ok) return; n = await r.json(); } catch (e) { return; }
+  if (!n || !n.on || !(n.body || n.title)) return;
+  const key = "ntc-" + (n.id || n.title || "") , today = new Date().toISOString().slice(0, 10);
+  try { if (localStorage.getItem(key) === today) return; } catch (e) {}
+  const bg = document.createElement("div");
+  bg.className = "ntc-bg";
+  const link = /^https:\/\//.test(n.link || "") ? n.link : "";
+  const linkify = t => esc(t).replace(/(https:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">$1</a>');
+  bg.innerHTML = `<div class="ntc"><h3>📢 ${esc(n.title || "공지")}</h3><div class="nb">${n.big ? `<div style="font-size:26px;font-weight:900;line-height:1.35;text-align:center;margin:6px 0 14px;white-space:normal">${esc(n.big)}</div>` : ""}${linkify(n.body || "")}${link ? `<a href="${esc(link)}" target="_blank" rel="noopener" style="display:block;margin-top:14px;text-align:center;background:#fee500;color:#191919;font-weight:900;font-size:16px;border-radius:12px;padding:13px 0;text-decoration:none;white-space:normal">${esc(n.link_label || "바로가기")}</a>` : ""}</div>
+    <div class="nf"><span id="ntc-day">오늘 하루 안 보기</span><span id="ntc-x">닫기</span></div></div>`;
+  document.body.appendChild(bg);
+  const close = () => bg.remove();
+  bg.querySelector("#ntc-x").onclick = close;
+  bg.onclick = e => { if (e.target === bg) close(); };
+  bg.querySelector("#ntc-day").onclick = () => { try { localStorage.setItem(key, today); } catch (e) {} close(); };
+}
 curLabel();
+setTimeout(showNotice, 200);
 render();
 </script>
 </body>
