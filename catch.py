@@ -146,6 +146,12 @@ def _finish(out, hz, eng, by, S, sc, xrows=None):
             warn.append(f"당일 고점 대비 -{(1 - px / sn['day_hi']) * 100:.0f}% 밀림")
         if sn.get("vwap") and px < sn["vwap"] and (sn.get("chg") or 0) > 20:
             warn.append("급등 후 VWAP 아래")
+        cnow = xe.get("chg", sn.get("chg"))
+        if cnow is not None and cnow <= -10:
+            warn.append(f"지금 {cnow:.0f}% 하락 중 — 추천 근거 무너짐")
+        dil = [x for x in ("ATM·공모", "공모 준비", "물량 출회") if x in warn]
+        if dil and r.get("pat") in ("당일 급등 진행", "선행 급등 후 조정"):
+            warn.insert(0, "급등 직후 + 증자 가능 → 물량 쏟아질 위험 큼")
         ranks = [v["rank"] for v in e.values()]
         lst.append({"t": t, "name": it.get("name", "") or xe.get("name", ""), "px": px, "exp": px * (1 + mid / 100) if mid else None,
                     "up": mid, "cond": bool(r.get("cq") or (e.get("burn") or {}).get("q")), "rng": [q[0], q[2]] if q else None, "n": len(e), "avg": round(float(np.mean(ranks)), 1),
@@ -154,7 +160,8 @@ def _finish(out, hz, eng, by, S, sc, xrows=None):
                              + (["ELOC"] if ((it.get("deep") or {}).get("eloc") or {}).get("active") else []),
                     "eng": e, "warn": warn, "pat": r.get("pat"), "chg": xe.get("chg", sn.get("chg", r.get("ret1"))),
                     "focus": (len(e) >= 3 or (hz == "0" and e.get("preview", {}).get("rank", 99) <= 5)) and not warn})
-    lst.sort(key=lambda x: (-x["n"], x["avg"]))
+    # 경고 붙은 종목은 아래로 (경고 수 적은 순 → 많이 포착된 순 → 평균 순위)
+    lst.sort(key=lambda x: (min(len(x["warn"]), 2), -x["n"], x["avg"]))
     out["hz"][hz] = {"list": lst[:60], "counts": {k: min(len(v), TOP) for k, v in eng.items()},
                      "only": (["preview", "ext"] if hz == "0" else None)}
 
