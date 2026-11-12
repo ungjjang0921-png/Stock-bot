@@ -122,6 +122,7 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, 
 
 
 def _finish(out, hz, eng, by, S, sc, xrows=None):
+    dropped = []
     # 엔진별 순위 → 종목별 합치기
     cat = {}
     for k, rows in eng.items():
@@ -141,29 +142,48 @@ def _finish(out, hz, eng, by, S, sc, xrows=None):
         q = r.get("cq") or (e.get("burn") or {}).get("q") or r.get("q")
         mid = q[1] if q else None
         sn = it.get("snap") or {}
-        warn = _risk(it)
-        if sn.get("day_hi") and px < sn["day_hi"] * 0.85:
-            warn.append(f"당일 고점 대비 -{(1 - px / sn['day_hi']) * 100:.0f}% 밀림")
-        if sn.get("vwap") and px < sn["vwap"] and (sn.get("chg") or 0) > 20:
-            warn.append("급등 후 VWAP 아래")
-        cnow = xe.get("chg", sn.get("chg"))
-        if cnow is not None and cnow <= -10:
-            warn.append(f"지금 {cnow:.0f}% 하락 중 — 추천 근거 무너짐")
-        dil = [x for x in ("ATM·공모", "공모 준비", "물량 출회") if x in warn]
-        if dil and r.get("pat") in ("당일 급등 진행", "선행 급등 후 조정"):
-            warn.insert(0, "급등 직후 + 증자 가능 → 물량 쏟아질 위험 큼")
+        warn = _risk(it)                       # 증자·ATM 등은 꼬리표로만 (순위엔 영향 없음)
+        fall = falling(it, r, xe, px)          # 지금 떨어지려는 신호 → 많으면 추천에서 뺌
+        if len(fall) >= 2:
+            dropped.append({"t": t, "chg": xe.get("chg", (it.get("snap") or {}).get("chg")), "why": fall})
+            continue
         ranks = [v["rank"] for v in e.values()]
         lst.append({"t": t, "name": it.get("name", "") or xe.get("name", ""), "px": px, "exp": px * (1 + mid / 100) if mid else None,
                     "up": mid, "cond": bool(r.get("cq") or (e.get("burn") or {}).get("q")), "rng": [q[0], q[2]] if q else None, "n": len(e), "avg": round(float(np.mean(ranks)), 1),
                     "badge": [b for n, b in (("부도 위험", "부도위험"), ("ATM·공모", "ATM"), ("공모 준비", "공모준비"),
                                              ("물량 출회", "물량출회")) if n in {g["name"] for g in it.get("tags", [])}]
                              + (["ELOC"] if ((it.get("deep") or {}).get("eloc") or {}).get("active") else []),
-                    "eng": e, "warn": warn, "pat": r.get("pat"), "chg": xe.get("chg", sn.get("chg", r.get("ret1"))),
+                    "eng": e, "warn": warn, "fall": fall, "pat": r.get("pat"), "chg": xe.get("chg", sn.get("chg", r.get("ret1"))),
                     "focus": (len(e) >= 3 or (hz == "0" and e.get("preview", {}).get("rank", 99) <= 5)) and not warn})
-    # 경고 붙은 종목은 아래로 (경고 수 적은 순 → 많이 포착된 순 → 평균 순위)
-    lst.sort(key=lambda x: (min(len(x["warn"]), 2), -x["n"], x["avg"]))
-    out["hz"][hz] = {"list": lst[:60], "counts": {k: min(len(v), TOP) for k, v in eng.items()},
+    # 하락 신호 1개 붙은 종목만 아래로 (꼬리표는 상관없음) → 많이 포착된 순 → 평균 순위
+    lst.sort(key=lambda x: (len(x["fall"]), -x["n"], x["avg"]))
+    out["hz"][hz] = {"list": lst[:60], "dropped": dropped[:20], "counts": {k: min(len(v), TOP) for k, v in eng.items()},
                      "only": (["preview", "ext"] if hz == "0" else None)}
+
+
+def falling(it: dict, r: dict, xe: dict, px: float) -> list[str]:
+    """지금 떨어지려는 신호들. 2개 이상이면 추천에서 뺌, 1개면 아래로 + 이유 표시"""
+    sn = it.get("snap") or {}
+    out = []
+    cnow = xe.get("chg", sn.get("chg"))
+    if cnow is not None and cnow <= -5:
+        out.append(f"지금 {cnow:.0f}% 하락 중")
+    if sn.get("day_hi") and px < sn["day_hi"] * 0.85:
+        out.append(f"당일 고점 대비 -{(1 - px / sn['day_hi']) * 100:.0f}% 밀림")
+    if sn.get("vwap") and px < sn["vwap"] * 0.97:
+        out.append("VWAP 아래 (매도 우위)")
+    if xe.get("fade", 0) >= 10:
+        out.append(f"시간외 고점 대비 -{xe['fade']:.0f}%")
+    # 일봉: 전날 크게 올랐다 윗꼬리 길게 저가권 마감 → 설거지 모양
+    if r.get("ret1", 0) >= 15 and r.get("cp", 1) <= 0.35:
+        out.append(f"전날 +{r['ret1']:.0f}% 후 윗꼬리 마감 (설거지 모양)")
+    if r.get("ret5", 0) >= 60 and (cnow or 0) < 0:
+        out.append(f"5일간 +{r['ret5']:.0f}% 급등 뒤 꺾이는 중")
+    if r.get("ma20", 0) <= -25 and (cnow or 0) <= 0:
+        out.append("20일선 아래 하락 추세")
+    if (sn.get("relvol") or 0) >= 3 and (cnow or 0) < -3:
+        out.append("거래량 터지며 하락 (물량 출회)")
+    return out
 
 
 # ── 고정 기록과 적중률 ──

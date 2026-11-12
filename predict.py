@@ -588,6 +588,8 @@ def engine_scores(latest, Xn_now, p_now, cal, tr, Xn_tr, gcol, ftcol, H) -> dict
                           if (gg >= HORIZONS[H]).sum() >= 8 else None),
                    "sim": round(100 / (1 + dist), 1), "pat": pattern(row),
                    "ret1": round(float(row["ret1"]) * 100, 1), "px": float(row["close"]),
+                   "cp": round(float(row["cp"]), 2), "ret5": round(float(row["ret5"]) * 100, 1),
+                   "ma20": round(float(row["ma20"]) * 100, 1),
                    "rv": round(float(np.expm1(row["relvol"])), 1)}
             if row["ret1"] >= 0.10 and len(burn_pool) >= BURN_K:     # 버닝업: 비슷한 급등 사건
                 bd = d2[j, burn_pool]

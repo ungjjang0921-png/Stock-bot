@@ -543,7 +543,7 @@ function catchCards(L, Z){
         <div><div class="tk">${c.focus ? "🎯 " : ""}${esc(c.t)}${(c.badge || []).map(b => `<span style="font-size:10.5px;font-weight:700;margin-left:5px;padding:1px 6px;border-radius:6px;border:1px solid ${b === "부도위험" ? "#a23" : b === "ELOC" ? "#b8860b" : "#7a3b8c"};color:${b === "부도위험" ? "#ff7b8a" : b === "ELOC" ? "#f5b84a" : "#d59cf0"}">${esc(b)}</span>`).join("")}</div><div class="nm">${esc((c.name || "").slice(0, 32))}${c.pat ? " · " + esc(c.pat) : ""}</div></div>
         <div class="up2">${c.up != null ? (c.up >= 0 ? "+" : "") + c.up.toFixed(1) + "%" : "-"}<small>${c.cond ? "상승여력(급등 시)" : "상승여력"}</small></div></div>
       <div class="en">진입 <b>${usd(c.px)}</b> → 예상 <b>${c.exp ? usd(c.exp) : "-"}</b> <small>(${c.cond ? "급등 시 중앙" : "유사 사례 중앙"})</small>${c.rng ? ` <small>(범위 ${c.rng[0] >= 0 ? "+" : ""}${c.rng[0]}% ~ +${c.rng[1]}%)</small>` : ""}${c.chg != null ? ` · 오늘 <span class="${c.chg >= 0 ? "up" : "dn"}">${c.chg >= 0 ? "+" : ""}${(+c.chg).toFixed(1)}%</span>` : ""}</div>
-      ${c.warn.length ? `<div class="en" style="color:#ff8f8f">⚠️ ${c.warn.map(esc).join(" · ")}</div>` : ""}
+      ${(c.fall || []).length ? `<div class="en" style="color:#ff8f8f">📉 하락 신호: ${c.fall.map(esc).join(" · ")} — 반등 확인 전엔 기다리기</div>` : ""}
       <div class="eh"><span>포착 엔진</span><span class="dots">${[0,1,2,3,4,5].map(k => `<i class="${k < c.n ? "f" : ""}"></i>`).join("")} ${c.n}/6</span></div>
       <div class="eg">${EN.map(([k, ic]) => c.eng[k] ? `<div class="${cls(c.eng[k].rank)}">${ic} 포착<b>${c.eng[k].rank}위</b></div>` : Z.only && !Z.only.includes(k) ? `<div>${ic}<b style="font-size:10.5px;font-weight:400">대상외</b></div>` : `<div>${ic}<b>-</b></div>`).join("")}</div>
       <div class="cd">${catchDetail(c, CH)}${tradeBlock(DATA.items.find(x => x.t === c.t)).replace('class="tp"', 'class="tp" style="margin:0 0 6px"')}
@@ -767,7 +767,7 @@ function render(){
     const lab = {"0": C.mode === "pre" ? "오늘 · 프장" : C.mode === "night" ? "데이장·프장 대비" : "오늘", "1": "1거래일", "5": "5거래일", "10": "10거래일"};
     const Z = HZ[CH] || {list: [], counts: {}};
     $("#sub").textContent = `${DATA.updated} 업데이트 · ${C.sess || ""} ${C.at ? "(" + C.at + ")" : ""}`;
-    let h = `<div class="intro">📡 <b>포착</b> — 5개 엔진이 각자 상위 20개를 고르고, <b>여러 엔진이 같이 잡은 종목</b>을 위로 올려요 (많이 포착된 순 → 평균 순위). 카드를 누르면 엔진별 근거가 나와요.<br><span style="color:var(--muted)">칸 색: 진한 빨강 1~3위 · 빨간 테두리 4~10위 · 회색 11~20위. 🎯 = 3개 이상 엔진이 겹치고 경고 없음</span></div>
+    let h = `<div class="intro">📡 <b>포착</b> — 5개 엔진이 각자 상위 20개를 고르고, <b>여러 엔진이 같이 잡은 종목</b>을 위로 올려요 (많이 포착된 순 → 평균 순위). 카드를 누르면 엔진별 근거가 나와요.<br><span style="color:var(--muted)">칸 색: 진한 빨강 1~3위 · 빨간 테두리 4~10위 · 회색 11~20위. 🎯 = 3개 이상 엔진이 겹치고 경고 없음<br>📉 지금 떨어지려는 신호(하락 중·VWAP 아래·고점 대비 밀림·윗꼬리 마감·급등 뒤 꺾임·거래량 터지며 하락)가 2개 이상이면 추천에서 빼고 맨 아래 따로 보여줘요. ATM·물량출회 꼬리표는 순위와 상관없이 표시만 해요.</span></div>
       <div class="cz">${["0","1","5","10"].map(k => `<span class="${CH === k ? "on" : ""}" onclick="CH='${k}';render()" style="${k === "0" && C.mode !== "reg" ? "font-size:11px" : ""}">${lab[k]}<small>${(HZ[k] || {list: []}).list.length}</small></span>`).join("")}</div>`;
     const S = (C.stat || {})[CH === "0" ? (C.mode === "pre" ? "p" : C.mode === "night" ? "n" : "0") : CH];
     if (S && S.all && S.all.n) {
@@ -787,6 +787,7 @@ function render(){
     if (CE !== "all") L = L.slice().sort((a, b) => a.eng[CE].rank - b.eng[CE].rank);
     else if (CS === "up") L = L.slice().sort((a, b) => (b.up ?? -99) - (a.up ?? -99));
     window.CL = L; window.CZ = Z;
+    if ((Z.dropped || []).length) h += `<details class="cst" style="border-color:#5a2b33"><summary style="cursor:pointer"><b style="color:#ff8f8f">🚫 엔진이 잡았지만 하락 신호로 뺀 종목 ${Z.dropped.length}개</b></summary>${Z.dropped.map(x => `<div style="margin-top:6px"><b>${esc(x.t)}</b>${x.chg != null ? ` <span class="${x.chg >= 0 ? "up" : "dn"}">${x.chg >= 0 ? "+" : ""}${(+x.chg).toFixed(1)}%</span>` : ""} — ${x.why.map(esc).join(" · ")}</div>`).join("")}</details>`;
     h += `<div id="ccl"></div>`;
     $("#list").innerHTML = h;
     catchFilter();
