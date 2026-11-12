@@ -41,8 +41,6 @@ def ext_engine(ext: dict, by: dict, S1: dict) -> list:
         if chg is None or chg < 5 or vol < 30_000 or not px:
             continue
         it = by.get(r["t"])
-        if it and "부도 위험" in _risk(it):
-            continue
         p = (S1.get(r["t"]) or {}).get("p", 50)
         s = min(chg, 150) * (1 + np.log10(max(vol, 1e4) / 1e5) * 0.3) + p * 0.3
         rows.append((s, r["t"], {"chg": round(chg, 1), "vol": int(vol), "px": px, "p": round(p, 1),
@@ -70,7 +68,7 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, 
                 pr = pb.get("pre") if pre_mode and pb.get("pre") is not None else pb.get("reg")
                 sn = it.get("snap") or {}
                 chg, rv, vw = sn.get("chg"), sn.get("relvol") or 0, sn.get("vwap")
-                if pr is None or chg is None or chg < 3 or "부도 위험" in _risk(it):
+                if pr is None or chg is None or chg < 3:
                     continue
                 if vw and it["price"] < vw * 0.98:
                     continue
@@ -88,8 +86,6 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, 
         # 📈 시그널 — 모델 백분위
         rows = []
         for t, r in S.items():
-            if t in by and "부도 위험" in _risk(by[t]):
-                continue
             rows.append((r["p"], t, {"p": r["p"], "pat": r["pat"],
                                      "probs": {k: (sc.get(k, {}).get(t) or {}).get("prob") for k in ("1", "5", "10")},
                                      "q": r["q"]}))
@@ -108,7 +104,7 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, 
             it = by.get(t)
             chg = ((it or {}).get("snap") or {}).get("chg")
             chg = chg if chg is not None else r["ret1"]
-            if chg is None or chg < 10 or (it and "부도 위험" in _risk(it)):
+            if chg is None or chg < 10:
                 continue
             p5 = (S5.get(t) or {}).get("p", r["p"])
             fl = (it or {}).get("float") or 9e9
@@ -153,6 +149,9 @@ def _finish(out, hz, eng, by, S, sc, xrows=None):
         ranks = [v["rank"] for v in e.values()]
         lst.append({"t": t, "name": it.get("name", "") or xe.get("name", ""), "px": px, "exp": px * (1 + mid / 100) if mid else None,
                     "up": mid, "cond": bool(r.get("cq") or (e.get("burn") or {}).get("q")), "rng": [q[0], q[2]] if q else None, "n": len(e), "avg": round(float(np.mean(ranks)), 1),
+                    "badge": [b for n, b in (("부도 위험", "부도위험"), ("ATM·공모", "ATM"), ("공모 준비", "공모준비"),
+                                             ("물량 출회", "물량출회")) if n in {g["name"] for g in it.get("tags", [])}]
+                             + (["ELOC"] if ((it.get("deep") or {}).get("eloc") or {}).get("active") else []),
                     "eng": e, "warn": warn, "pat": r.get("pat"), "chg": xe.get("chg", sn.get("chg", r.get("ret1"))),
                     "focus": (len(e) >= 3 or (hz == "0" and e.get("preview", {}).get("rank", 99) <= 5)) and not warn})
     lst.sort(key=lambda x: (-x["n"], x["avg"]))

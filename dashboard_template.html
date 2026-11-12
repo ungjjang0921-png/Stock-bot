@@ -540,7 +540,7 @@ function catchDetail(c, hz){
 function catchCards(L, Z){
   const cls = r => r <= 3 ? "r1" : r <= 10 ? "r2" : "r3";
   return L.map((c, i) => `<div class="cc" id="cc-${esc(c.t)}"><div class="t1" onclick="catchToggle('${esc(c.t)}')" style="cursor:pointer"><span class="rk">${i + 1}</span>
-        <div><div class="tk">${c.focus ? "🎯 " : ""}${esc(c.t)}</div><div class="nm">${esc((c.name || "").slice(0, 32))}${c.pat ? " · " + esc(c.pat) : ""}</div></div>
+        <div><div class="tk">${c.focus ? "🎯 " : ""}${esc(c.t)}${(c.badge || []).map(b => `<span style="font-size:10.5px;font-weight:700;margin-left:5px;padding:1px 6px;border-radius:6px;border:1px solid ${b === "부도위험" ? "#a23" : b === "ELOC" ? "#b8860b" : "#7a3b8c"};color:${b === "부도위험" ? "#ff7b8a" : b === "ELOC" ? "#f5b84a" : "#d59cf0"}">${esc(b)}</span>`).join("")}</div><div class="nm">${esc((c.name || "").slice(0, 32))}${c.pat ? " · " + esc(c.pat) : ""}</div></div>
         <div class="up2">${c.up != null ? (c.up >= 0 ? "+" : "") + c.up.toFixed(1) + "%" : "-"}<small>${c.cond ? "상승여력(급등 시)" : "상승여력"}</small></div></div>
       <div class="en">진입 <b>${usd(c.px)}</b> → 예상 <b>${c.exp ? usd(c.exp) : "-"}</b> <small>(${c.cond ? "급등 시 중앙" : "유사 사례 중앙"})</small>${c.rng ? ` <small>(범위 ${c.rng[0] >= 0 ? "+" : ""}${c.rng[0]}% ~ +${c.rng[1]}%)</small>` : ""}${c.chg != null ? ` · 오늘 <span class="${c.chg >= 0 ? "up" : "dn"}">${c.chg >= 0 ? "+" : ""}${(+c.chg).toFixed(1)}%</span>` : ""}</div>
       ${c.warn.length ? `<div class="en" style="color:#ff8f8f">⚠️ ${c.warn.map(esc).join(" · ")}</div>` : ""}
