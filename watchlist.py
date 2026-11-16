@@ -2503,8 +2503,8 @@ def write_rt_watch(items: list) -> None:
     chat = chat or os.getenv("TELEGRAM_CHAT_ID")
     ts = []                                       # 📡 포착 종목만 (⭐관심·대형주 제외)
     for hz in ("0", "1"):
-        ts += [c["t"] for c in ((CATCH.get("hz") or {}).get(hz) or {}).get("list", [])[:10] if not c.get("fall")]
-    ts = list(dict.fromkeys(ts))[:20]
+        ts += [c["t"] for c in ((CATCH.get("hz") or {}).get(hz) or {}).get("list", []) if not c.get("fall")]
+    ts = list(dict.fromkeys(ts))[:20]               # 오늘·1거래일 순위대로 채워서 20개 (워커 한도)
     (OUT.parent / "rt_watch.json").write_text(json.dumps({"chat": chat, "t": ts}), encoding="utf-8")
     log.info("실시간 감시 목록 %d종목", len(ts))
 
