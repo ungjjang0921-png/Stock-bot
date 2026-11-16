@@ -2495,13 +2495,13 @@ def write_bars(items: list) -> None:
 
 
 def write_rt_watch(items: list) -> None:
-    """Cloudflare 실시간 감시 목록 → docs/rt_watch.json (포착 상위 + ⭐관심, 최대 20개)"""
+    """Cloudflare 실시간 감시 목록 → docs/rt_watch.json (포착 오늘·1거래일 상위, 하락 신호 제외, 최대 20개)"""
     try:
         chat = json.loads((ROOT / "state.json").read_text(encoding="utf-8")).get("chat_id")
     except Exception:
         chat = None
     chat = chat or os.getenv("TELEGRAM_CHAT_ID")
-    ts = [it["t"] for it in items if it.get("watch")]
+    ts = []                                       # 📡 포착 종목만 (⭐관심·대형주 제외)
     for hz in ("0", "1"):
         ts += [c["t"] for c in ((CATCH.get("hz") or {}).get(hz) or {}).get("list", [])[:10] if not c.get("fall")]
     ts = list(dict.fromkeys(ts))[:20]
