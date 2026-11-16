@@ -24,7 +24,25 @@ select{flex:0 0 auto;max-width:46%}
 .lcw h5{margin:0 0 6px;font-size:13px;display:flex;justify-content:space-between}
 .lcw h5 small{font-weight:400;color:var(--muted);font-size:10.5px}
 .lc{height:270px;position:relative}.lc .msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px}
+.lsig{display:none;margin-bottom:6px;padding:8px 10px;border-radius:10px;font-size:12.5px;line-height:1.5}
+.lsig.warm{display:block;background:rgba(245,184,74,.14);border:1px solid rgba(245,184,74,.5);color:#f5b84a}
+.lsig.go{display:block;background:rgba(239,68,68,.16);border:1px solid #ef4444;color:#ff7b8a;animation:lp 1s ease-in-out 3}
+@keyframes lp{50%{background:rgba(239,68,68,.4)}}
 .lcb{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.ltg{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.ltg span{font-size:12px;font-weight:700;padding:6px 11px;border-radius:10px;border:1px solid #2a3647;color:#7f8ea3;cursor:pointer;user-select:none}
+.ltg span.on{border-color:#5ea8ff;color:#e8eef6;background:rgba(94,168,255,.14)}
+.lan{margin-top:8px;font-size:12.5px;line-height:1.65;background:#0f1722;border-radius:10px;padding:8px 10px}.lan:empty{display:none}
+.lan b{color:#fff}
+.lpl{margin-top:8px}.lpl:empty{display:none}
+.lpl .pc{background:#0f1722;border-radius:10px;padding:10px}
+.lpl h6{margin:0 0 6px;font-size:13px}.lpl h6 small{font-weight:400;color:var(--muted);font-size:11px}
+.lpl .pr{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #1c2633;font-size:12.5px}
+.lpl .pr:last-of-type{border-bottom:0}
+.lpl .pr b{font-family:var(--mono);white-space:nowrap}.lpl .pr .u{color:#ff6b7a}.lpl .pr .d{color:#5ea8ff}
+.lpl .nt{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.5}
+.lpl .tg{display:inline-block;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:12px;margin:6px 0 2px}
+.lpl .tg.y{background:rgba(34,197,94,.14);color:#22c55e}.lpl .tg.n{background:rgba(245,184,74,.14);color:#f5b84a}
 .lcb span{font-size:11px;font-weight:700;padding:3px 8px;border-radius:12px;background:var(--panel2)}
 .lcb .g{color:#22c55e;background:rgba(34,197,94,.12)}.lcb .r{color:#ff6b7a;background:rgba(239,68,68,.12)}.lcb .b{color:#5ea8ff;background:rgba(94,168,255,.12)}
 .ntc-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;display:flex;align-items:center;justify-content:center;padding:16px}
@@ -590,7 +608,8 @@ function kpFilter(){
 }
 // ── ⚡ 1분 차트 · 자동 추세선 (lightweight-charts) ──
 function chartBox(t){
-  return `<div class="lcw"><h5>⚡ 1분 차트 · 자동 추세선 <small>사이트 갱신 시점까지 · 프장·애프터 포함</small></h5><div class="lc" data-t="${esc(t)}"><div class="msg">불러오는 중…</div></div><div class="lcb"></div></div>`;
+  return `<div class="lcw"><h5>⚡ 1분 차트 · 자동 추세선 <small>사이트 갱신 시점까지 · 프장·애프터 포함</small></h5><div class="lsig"></div><div class="lc" data-t="${esc(t)}"><div class="msg">불러오는 중…</div></div><div class="lcb"></div><div class="ltg"></div><div class="lan"></div><div class="lpl"></div>
+    <div style="margin-top:6px;font-size:11px;color:var(--muted)"><span class="lnb" onclick="notifyOn(this)" style="cursor:pointer;color:var(--accent);font-weight:700">🔔 출발 알림 켜기</span> · 차트를 열어둔 동안 예열·출발 신호가 뜨면 소리·진동·알림</div></div>`;
 }
 let LWC = null;
 function lwcLib(){
@@ -661,8 +680,9 @@ async function drawChart(el, t){
   vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}});
   const lineOpt = c => ({color: c, lineWidth: 2, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false});
   const vwS = ch.addLineSeries(lineOpt("#f5b84a")), dnS = ch.addLineSeries(lineOpt("#5ea8ff")), upS = ch.addLineSeries(lineOpt("#22c55e"));
-  let lines = false, first = true;
+  let first = true;
   const badge = el.parentNode.querySelector(".lcb"), head = el.parentNode.querySelector("h5 small");
+  if (NOTI){ const nb = el.parentNode.querySelector(".lnb"); if (nb) nb.textContent = "🔔 출발 알림 켜짐"; }
   const paint = (raw, live) => {
     const B = raw.map(r => ({time: r[0] + KST, open: r[1], high: r[2], low: r[3], close: r[4], v: r[5]}));
     cs.setData(B.map(({v, ...x}) => x));
@@ -675,14 +695,7 @@ async function drawChart(el, t){
     const dn = trendLine(B, PH, "high", true), upL = trendLine(B, PL, "low", false);
     dnS.setData(dn ? dn.pts : []); upS.setData(upL ? upL.pts : []);
     const last = B[B.length - 1].close, lo = Math.min(...B.map(b => b.low)), hi = Math.max(...B.map(b => b.high));
-    if (!lines){
-      lines = true;
-      const inR = v => v && v > lo * 0.75 && v < hi * 1.35, PL_ = [], tp = it.trade || {};
-      [["1차 매수", tp.e1, "#22c55e"], ["2차 매수", tp.e2, "#22c55e"], ["손절", tp.stop, "#ef4444"], ["익절①", tp.t1, "#ff7b8a"], ["익절②", tp.t2, "#ff7b8a"]]
-        .forEach(([n, v, c]) => inR(v) && PL_.push([n, v, c, 2]));
-      ((it.deep || {}).levels || []).forEach(x => inR(x.px_adj) && PL_.push([x.kind, x.px_adj, "#b49cff", 1]));
-      PL_.slice(0, 10).forEach(([n, v, c, st]) => cs.createPriceLine({price: v, color: c, lineWidth: 1, lineStyle: st, axisLabelVisible: true, title: `${n} ${usd(v)}`}));
-    }
+    drawLevels(el, cs, B, vw, it, t, last, lo, hi);
     if (first){ ch.timeScale().fitContent(); first = false; }
     const lastPH = PH.slice(-2).map(i => B[i].high), lastPL = PL.slice(-2).map(i => B[i].low);
     const hiDown = lastPH.length === 2 && lastPH[1] < lastPH[0], loUp = lastPL.length === 2 && lastPL[1] > lastPL[0];
@@ -696,6 +709,7 @@ async function drawChart(el, t){
     bd.push(["", `마지막 봉 ${t0}`]);
     badge.innerHTML = bd.map(([c, x]) => `<span class="${c}">${esc(x)}</span>`).join("")
       + `<span style="background:none;color:var(--muted);font-weight:400">🟡 VWAP · 🔵 하락 추세선(고점 연결) · 🟢 상승 추세선(저점 연결)</span>`;
+    ignite(el, t, B, vw, dn, hi, live);
     head.innerHTML = live ? `<span style="color:#22c55e">● 실시간</span> · 15초마다` : "사이트 갱신 시점까지 · 프장·애프터 포함";
   };
   paint(raw, live);
@@ -710,6 +724,170 @@ async function drawChart(el, t){
     setTimeout(tick, 15000);
   };
   setTimeout(tick, 15000);
+}
+// ── 📏 차트 가격선: 줄먹(익절·손절) · 정지선(LULD) · 주요 가격(공시) · 자동 지지·저항 · 예상 목표가 ──
+const LGRP = [["plan", "📐 줄먹"], ["halt", "⏸ 정지선"], ["key", "💲 주요 가격선"], ["sr", "📏 자동 지지·저항"], ["tgt", "🎯 예상 목표가"]];
+let LON = {plan: 1, halt: 1, key: 1, sr: 1, tgt: 1};
+try { LON = Object.assign(LON, JSON.parse(localStorage.getItem("lon") || "{}")); } catch (e) {}
+function etClock(sec){
+  const d = new Date(sec * 1000), f = new Intl.DateTimeFormat("en-US", {timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false}).formatToParts(d);
+  const g = k => +f.find(x => x.type === k).value;
+  return (g("hour") % 24) * 60 + g("minute");
+}
+function luld(B){
+  // 정규장 거래정지 밴드 (Tier 2 소형주): 직전 5분 평균가 기준 · $3 초과 10% / $0.75~3 20% / $0.75 미만 min($0.15, 75%) · 장 시작 15분·마감 25분은 2배
+  const n = B.length, m = etClock(B[n - 1].time - 9 * 3600);
+  if (m < 570 || m >= 960) return null;
+  const w = B.slice(-5), ref = w.reduce((s, b) => s + b.close, 0) / w.length;
+  let band = ref > 3 ? ref * 0.10 : ref >= 0.75 ? ref * 0.20 : Math.min(0.15, ref * 0.75);
+  if (m < 585 || m >= 935) band *= 2;
+  return {up: ref + band, dn: Math.max(ref - band, 0.0001)};
+}
+function autoSR(B, last){
+  // 1분봉 꼭지·바닥을 1.5% 안쪽끼리 묶어서, 여러 번 막힌/받친 가격을 지지·저항으로
+  const k = B.length > 300 ? 5 : 3;
+  const P = pivots(B, k, "high", (a, b) => a >= b).map(i => B[i].high).concat(pivots(B, k, "low", (a, b) => a <= b).map(i => B[i].low)).sort((a, b) => a - b);
+  const cl = [];
+  P.forEach(v => { const c = cl[cl.length - 1]; if (c && v <= c.lo * 1.015){ c.v.push(v); } else cl.push({lo: v, v: [v]}); });
+  const L = cl.map(c => ({px: c.v.reduce((s, x) => s + x, 0) / c.v.length, n: c.v.length}));
+  const sup = L.filter(x => x.px < last * 0.995).sort((a, b) => b.px - a.px).slice(0, 2);
+  const res = L.filter(x => x.px > last * 1.005).sort((a, b) => a.px - b.px).slice(0, 2);
+  // 매물대: 가격 구간별 거래량이 가장 많은 곳
+  const lo = Math.min(...B.map(b => b.low)), hi = Math.max(...B.map(b => b.high)), N = 24, step = (hi - lo) / N || 1, bins = new Array(N).fill(0);
+  B.forEach(b => { const i = Math.min(N - 1, Math.floor(((b.high + b.low) / 2 - lo) / step)); bins[i] += b.v; });
+  const mx = bins.indexOf(Math.max(...bins)), vp = bins[mx] > 0 ? lo + step * (mx + 0.5) : null;
+  return {sup, res, vp};
+}
+function catchExp(t){
+  const hz = ((DATA.catch || {}).hz) || {};
+  for (const k of ["0", "1", "p", "n"]){ const c = ((hz[k] || {}).list || []).find(x => x.t === t); if (c && c.exp) return c.exp; }
+  return null;
+}
+function drawLevels(el, cs, B, vw, it, t, last, lo, hi){
+  (el._pl || []).forEach(l => { try { cs.removePriceLine(l); } catch (e) {} });
+  el._pl = [];
+  const tp = it.trade || {}, inR = v => v && v > lo * 0.6 && v < hi * 1.8;
+  const sr = autoSR(B, last), H = luld(B), exp = catchExp(t) || it.target, ph = tp.ph;
+  const phPx = ph && ph.base ? ph.base * (1 + ph.med / 100) : null;
+  // 저항 후보(현재가 위)로 익절 ⅔ · 나머지 정하기
+  const R = [...sr.res.map(x => x.px), tp.t1, tp.t2, exp, phPx, ...((it.deep || {}).levels || []).map(x => x.px_adj)]
+    .filter(v => v && v > last * 1.02).sort((a, b) => a - b);
+  const r1 = R[0] || last * 1.15, r2 = R.find(v => v > r1 * 1.05) || r1 * 1.1;
+  const S = [...sr.sup.map(x => x.px), vw[vw.length - 1].value, tp.e1].filter(v => v && v < last * 0.99 && v > last * 0.75).sort((a, b) => b - a);
+  const good = S[0] || null, stop = Math.max(Math.min((S[1] || S[0] || last * 0.88) * 0.98, last * 0.95), last * 0.75);
+  const L = {
+    plan: [["익절① ⅔", r1, "#ff6b7a", 0], ["익절② 나머지", r2, "#ff6b7a", 2], good && ["좋은 자리", good, "#22c55e", 2], ["손절", stop, "#5ea8ff", 2]],
+    halt: H ? [["⏸ 정지선", H.up, "#f5b84a", 1], ["⏸ 정지선", H.dn, "#f5b84a", 1]] : [],
+    key: ((it.deep || {}).levels || []).filter(x => inR(x.px_adj)).slice(0, 4).map(x => [`${x.badge === "워런트" ? "워런트 " : ""}${x.kind}`, x.px_adj, "#b49cff", 1]),
+    sr: [...sr.sup.map(x => [`지지${x.n > 1 ? `(${x.n}번)` : ""}`, x.px, "#5ea8ff", 2]), ...sr.res.map(x => [`저항${x.n > 1 ? `(${x.n}번)` : ""}`, x.px, "#ff6b7a", 2]),
+      sr.vp && ["매물대", sr.vp, "#38bdf8", 1], phPx && [`과거 급등 고점 중간 +${ph.med}% (${ph.n}번)`, phPx, "#ff8f6b", 2]],
+    tgt: [exp && ["차트 목표", exp, "#ff6b7a", 1]],
+  };
+  const D = [];                                   // 0.6% 안쪽으로 겹치는 선은 하나로 합치기 (이름만 이어붙임)
+  LGRP.forEach(([g]) => { if (!LON[g]) return; (L[g] || []).filter(x => x && inR(x[1])).forEach(([n, v, c, st]) => {
+    const o = D.find(x => Math.abs(x.v / v - 1) < 0.006);
+    if (o){ if (!o.n.includes(n)) o.n.push(n); } else D.push({n: [n], v, c, st}); }); });
+  D.forEach(x => el._pl.push(cs.createPriceLine({price: x.v, color: x.c, lineWidth: 1, lineStyle: x.st, axisLabelVisible: true, title: `${x.n.join(" · ")} ${usd(x.v)}`})));
+  // 토글 버튼
+  const tg = el.parentNode.querySelector(".ltg");
+  if (tg && !tg.dataset.done){
+    tg.dataset.done = 1;
+    tg.innerHTML = LGRP.map(([g, n]) => `<span data-g="${g}" class="${LON[g] ? "on" : ""}">${n}</span>`).join("");
+    tg.onclick = e => { const g = e.target.dataset && e.target.dataset.g; if (!g) return;
+      LON[g] = LON[g] ? 0 : 1; e.target.classList.toggle("on", !!LON[g]);
+      try { localStorage.setItem("lon", JSON.stringify(LON)); } catch (x) {}
+      if (el._last) drawLevels(el, cs, ...el._last); };
+  }
+  el._last = [B, vw, it, t, last, lo, hi];
+  // 분석 · 줄먹 계획
+  const v0 = vw[vw.length - 1].value, hiI = B.reduce((m, b, i) => b.high > B[m].high ? i : m, 0);
+  const W = B.slice(-30);                          // 최근 30분 오를 때·떨어질 때 거래량 비교
+  let upV = 0, dnV = 0; W.forEach(b => { if (b.close >= b.open) upV += b.v; else dnV += b.v; });
+  const hasV = upV + dnV > 0, ratio = hasV ? (upV ? dnV / upV : 9.9) : null;
+  const base = B.slice(-35, -5), rec = B.slice(-5), av = a => a.reduce((s, b) => s + b.v, 0) / Math.max(a.length, 1);
+  const vx = hasV && av(base) > 0 ? av(rec) / av(base) : null;
+  const fromHi = (last / hi - 1) * 100;
+  const an = [`📉 고점 <b>${usd(hi)}</b>에서 <b>${fromHi.toFixed(0)}%</b> · VWAP ${last >= v0 ? "위" : "아래"}`];
+  if (ratio != null && ratio >= 1.5) an.push(`🔴 <b>투매형</b> — 떨어질 때 거래량이 오를 때의 <b>${ratio >= 9.9 ? "10배 이상" : ratio.toFixed(1) + "배"}</b> → 큰 물량이 넘어가는 중`);
+  else if (ratio != null && ratio <= 0.67) an.push(`🟢 <b>매집형</b> — ${dnV > 0 && ratio > 0.1 ? `오를 때 거래량이 떨어질 때의 <b>${(1 / ratio).toFixed(1)}배</b>` : "떨어질 때 거래량이 거의 없음"} → 사는 쪽이 강함`);
+  else if (ratio != null) an.push(`⚪ <b>균형</b> — 오를 때·떨어질 때 거래량 비슷 (${ratio.toFixed(1)}배)`);
+  if (ph) an.push(`📚 과거 급등(장중 +20% 이상) <b>${ph.n}번</b> · 고점 중간 <b>+${ph.med}%</b> → 전일 종가 기준 ${usd(phPx)}`);
+  if (H) an.push(`⏸ 거래정지선 위 ${usd(H.up)} (+${((H.up / last - 1) * 100).toFixed(0)}%) · 아래 ${usd(H.dn)} (${((H.dn / last - 1) * 100).toFixed(0)}%) <small style="color:var(--muted)">· 직전 5분 평균 기준 추정</small>`);
+  const an_ = el.parentNode.querySelector(".lan"); if (an_) an_.innerHTML = an.join("<br>");
+  const trig = last >= v0 && vx != null && vx >= 1.5 && !(ratio >= 1.5);
+  const pc = v => `${v >= last ? "+" : ""}${((v / last - 1) * 100).toFixed(0)}%`;
+  const pl = el.parentNode.querySelector(".lpl");
+  if (pl) pl.innerHTML = `<div class="pc"><h6>📐 줄먹 계획 <small>나눠서 익절 · 맹신 말고 대처 · 현재가 ${usd(last)} 기준</small></h6>
+    <div class="pr"><span>⅔ ${trig ? "첫 저항에서 대부분 정리" : "트리거 없음 → 첫 저항(기술적 반등 자리)에서 대부분 정리"}</span><b class="u">${usd(r1)} ${pc(r1)}</b></div>
+    <div class="pr"><span>나머지 · 매수세가 붙었을 때만</span><b class="u">${usd(r2)} ${pc(r2)}</b></div>
+    ${good ? `<div class="pr"><span>좋은 자리 · 이 근처까지 눌리면</span><b class="d">${usd(good)} ${pc(good)}</b></div>` : ""}
+    <div class="pr"><span>손절 · 여기 깨지면 전부 정리</span><b class="d">${usd(stop)} ${pc(stop)}</b></div>
+    <div class="nt">첫 익절을 하면 손절선을 매수가로 올려요 → 나머지는 '공짜로' 끌고 가는 셈이에요.</div>
+    <span class="tg ${trig ? "y" : "n"}">${trig ? "✅ 트리거 있음" : "⚠ 트리거 없음"}</span>
+    <div class="nt">${trig ? `VWAP 위 + 거래량 ×${vx.toFixed(1)} → 매수세가 붙는 중. 나머지는 ${usd(r2)}까지 끌고 가볼 만해요.`
+      : `기술적 반등만 기대 · 첫 저항까지만. 추가 매수세가 안 붙으면 반등 자리까지 갔다가 내려와요.${vx != null ? ` (최근 거래량 ×${vx.toFixed(1)})` : ""}`}</div></div>`;
+}
+// ── 🚀 출발 감지: 급등 "직전" 모양(예열)과 막 터지는 순간(출발)을 1분봉으로 판단 ──
+function ignite(el, t, B, vw, dn, hi, live){
+  const box = el.parentNode.querySelector(".lsig"); if (!box || B.length < 30) return;
+  const n = B.length, last = B[n - 1], c = last.close;
+  const hasVol = B.slice(-30).some(b => b.v > 0);
+  const avgV = a => a.reduce((s, b) => s + b.v, 0) / Math.max(a.length, 1);
+  const base = B.slice(-33, -3), recent = B.slice(-3);
+  const vx = hasVol && avgV(base) > 0 ? avgV(recent) / avgV(base) : null;
+  const w20 = B.slice(-21, -1), hi20 = Math.max(...w20.map(b => b.high)), lo20 = Math.min(...w20.map(b => b.low));
+  const tight = (hi20 - lo20) / lo20 * 100;                       // 최근 20분 변동폭 %
+  const wide = B.slice(-81, -21), wideR = wide.length ? (Math.max(...wide.map(b => b.high)) - Math.min(...wide.map(b => b.low))) / Math.min(...wide.map(b => b.low)) * 100 : tight * 2;
+  const v0 = vw[vw.length - 1].value;
+  const rising = B.slice(-5).filter((b, i, a) => i && b.low >= a[i - 1].low).length >= 3;  // 저점 높여가는 중
+  const W = [], G = [];
+  // 예열: 변동폭이 줄어든 채(압축) VWAP 위, 저항(20분 고점·하락 추세선) 3% 안, 거래량이 붙기 시작
+  if (tight < wideR * 0.6 && tight < 8) W.push(`변동폭 압축 (최근 20분 ${tight.toFixed(1)}%)`);
+  if (c >= v0) W.push("VWAP 위");
+  if (c >= hi20 * 0.97 && c <= hi20) W.push(`20분 고점 ${usd(hi20)} 바로 아래`);
+  if (dn && c >= dn.now * 0.97 && c <= dn.now) W.push(`하락 추세선 ${usd(dn.now)} 바로 아래`);
+  if (vx && vx >= 1.8 && vx < 3) W.push(`거래량 증가 ×${vx.toFixed(1)}`);
+  if (rising) W.push("저점 높여가는 중");
+  // 출발: 저항 돌파 + 거래량 폭발
+  if (c > hi20 * 1.005) G.push(`20분 고점 ${usd(hi20)} 돌파`);
+  if (dn && c > dn.now * 1.005) G.push(`하락 추세선 돌파`);
+  if (vx && vx >= 3) G.push(`거래량 폭발 ×${vx.toFixed(1)}`);
+  if (c >= v0) G.push("VWAP 위");
+  const fromHi = (c / hi - 1) * 100;
+  const go = G.length >= 3 && (G.some(x => x.includes("돌파"))) && (vx == null || vx >= 3) && fromHi > -3;
+  const warm = !go && W.length >= 4 && W.includes("VWAP 위");
+  const key = "lsig-" + t;
+  if (go){
+    box.className = "lsig go";
+    box.innerHTML = `🚀 <b>출발 신호</b> — ${G.map(esc).join(" · ")}<br><small>추격 주의: 돌파 가격 ${usd(hi20)} 아래로 다시 빠지면 실패 신호</small>`;
+  } else if (warm){
+    box.className = "lsig warm";
+    box.innerHTML = `⚡ <b>예열</b> — ${W.map(esc).join(" · ")}<br><small>${usd(Math.max(hi20, dn ? dn.now : 0))} 돌파 + 거래량 3배면 출발</small>`;
+  } else { box.className = "lsig"; box.innerHTML = ""; }
+  if (!hasVol) box.innerHTML += box.innerHTML ? `<br><small style="opacity:.7">프장·애프터는 거래량이 0으로 와서 거래량 조건은 빼고 판단해요</small>` : "";
+  const state = go ? "go" : warm ? "warm" : "";
+  if (live && state && window[key] !== state && (state === "go" || window[key] !== "go")){
+    alertSig(t, state === "go" ? `🚀 ${t} 출발 신호` : `⚡ ${t} 예열`, (go ? G : W).join(" · "), state === "go");
+  }
+  window[key] = state;
+}
+let NOTI = false;
+try { NOTI = localStorage.getItem("noti") === "1"; } catch (e) {}
+function notifyOn(btn){
+  NOTI = true; try { localStorage.setItem("noti", "1"); } catch (e) {}
+  if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+  btn.textContent = "🔔 출발 알림 켜짐"; beep(false);
+}
+function beep(big){
+  try { const a = new (window.AudioContext || window.webkitAudioContext)(); [0, 0.25, big ? 0.5 : null].filter(x => x != null).forEach(dt => {
+    const o = a.createOscillator(), g = a.createGain(); o.frequency.value = big ? 1100 : 760; g.gain.value = 0.15;
+    o.connect(g); g.connect(a.destination); o.start(a.currentTime + dt); o.stop(a.currentTime + dt + 0.15); }); } catch (e) {}
+}
+function alertSig(t, title, body, big){
+  if (!NOTI) return;
+  beep(big);
+  try { navigator.vibrate && navigator.vibrate(big ? [300, 100, 300, 100, 300] : [200]); } catch (e) {}
+  try { if ("Notification" in window && Notification.permission === "granted") new Notification(title, {body, tag: "lsig-" + t}); } catch (e) {}
 }
 function tradeBlock(it){
   const t = it && it.trade; if (!t) return "";

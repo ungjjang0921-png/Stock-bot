@@ -1148,6 +1148,15 @@ def trade_plan(it: dict, df: pd.DataFrame | None) -> dict | None:
     t1 = tg[0] if tg else avg * (1 + min(max(0.15, aa * 2), 0.60))
     t2 = next((x for x in tg if x > t1 * 1.10), t1 * 1.25)
     rr = (t1 - avg) / (avg - stop) if avg > stop else None
+    # 과거 급등 이력: 전일 종가 대비 장중 고가 +20% 이상 날들의 고점 상승률 중간값 (차트 '과거 급등 고점 중간' 선)
+    ph = None
+    try:
+        g = (h / c.shift() - 1).dropna()
+        sg = g[g >= 0.20]
+        if len(sg):
+            ph = {"n": int(len(sg)), "med": round(float(sg.median()) * 100, 1), "base": prev_c}
+    except Exception:
+        pass
     # 판단
     names = {t["name"]: t["level"] for t in it.get("tags", [])}
     ex = it.get("ex") or {}
@@ -1174,7 +1183,7 @@ def trade_plan(it: dict, df: pd.DataFrame | None) -> dict | None:
         verdict, lv_ = "돌파 확인 후 진입이 안전 (차트 약함)", "mid"
     return {"e1": e1, "e1k": e1k, "e2": e2, "e2k": e2k, "brk": brk * 1.01 if brk else None, "brk_lv": brk,
             "stop": stop, "t1": t1, "t2": t2, "rr": round(rr, 1) if rr else None, "avg": avg,
-            "atr": round(atr * 100, 1), "verdict": verdict, "lv": lv_}
+            "atr": round(atr * 100, 1), "verdict": verdict, "lv": lv_, "ph": ph}
 
 
 def build_candidates(items, prices, frames, jb):
