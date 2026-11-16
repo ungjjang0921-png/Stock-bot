@@ -2494,6 +2494,21 @@ def write_bars(items: list) -> None:
     log.info("1분봉 차트 파일 %d개", n)
 
 
+def write_rt_watch(items: list) -> None:
+    """Cloudflare 실시간 감시 목록 → docs/rt_watch.json (포착 상위 + ⭐관심, 최대 20개)"""
+    try:
+        chat = json.loads((ROOT / "state.json").read_text(encoding="utf-8")).get("chat_id")
+    except Exception:
+        chat = None
+    chat = chat or os.getenv("TELEGRAM_CHAT_ID")
+    ts = [it["t"] for it in items if it.get("watch")]
+    for hz in ("0", "1"):
+        ts += [c["t"] for c in ((CATCH.get("hz") or {}).get(hz) or {}).get("list", [])[:10] if not c.get("fall")]
+    ts = list(dict.fromkeys(ts))[:20]
+    (OUT.parent / "rt_watch.json").write_text(json.dumps({"chat": chat, "t": ts}), encoding="utf-8")
+    log.info("실시간 감시 목록 %d종목", len(ts))
+
+
 def write_page(items: list[dict], surge=None, jbc=None) -> None:
     tpl = (ROOT / "dashboard_template.html").read_text(encoding="utf-8")
     payload = _clean({"updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"), "items": items,
@@ -2509,6 +2524,10 @@ def write_page(items: list[dict], surge=None, jbc=None) -> None:
         write_bars(items)
     except Exception as e:
         log.warning("1분봉 차트 저장 실패: %s", e)
+    try:
+        write_rt_watch(items)
+    except Exception as e:
+        log.warning("실시간 감시 목록 저장 실패: %s", e)
 
 
 TELEGRAM_HOURS_KST = {21, 1, 5}   # 매시간 갱신해도 텔레그램 요약은 이 시간대에만 (수동 실행은 항상)
