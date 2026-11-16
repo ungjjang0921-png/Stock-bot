@@ -22,6 +22,7 @@ import math
 import os
 import pickle
 import re
+import shutil
 import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -1782,6 +1783,7 @@ def analyze() -> list[dict]:
     PRICES.update(prices)
     save_caches()                                   # 중간에 끊겨도 받은 데이터는 남김
     mins = intraday(tickers)
+    MINS.update(mins)
     log.info("일봉 %d · 1분봉 %d", len(prices), len(mins))
     frames = {t: tech_frame(df) for t, df in prices.items()}
     stats = similar_stats(frames)
@@ -2454,6 +2456,7 @@ def build_squeeze(items: list) -> list[dict]:
 
 
 SQUEEZE: list = []
+MINS: dict = {}
 CATCH: dict = {}
 
 
@@ -2474,6 +2477,23 @@ def _clean(o):
     return o
 
 
+def write_bars(items: list) -> None:
+    """종목별 1분봉 → docs/b/티커.json (카드를 열 때만 읽음: [시각(초), 시, 고, 저, 종, 거래량])"""
+    d = OUT.parent / "b"
+    shutil.rmtree(d, ignore_errors=True)
+    d.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for it in items:
+        m = MINS.get(it["t"])
+        if m is None or len(m) < 5:
+            continue
+        rows = [[int(ts.timestamp()), round(float(r.Open), 5), round(float(r.High), 5), round(float(r.Low), 5),
+                 round(float(r.Close), 5), int(r.Volume)] for ts, r in m.iterrows() if r.Close == r.Close]
+        (d / f"{it['t']}.json").write_text(json.dumps(rows, separators=(",", ":")), encoding="utf-8")
+        n += 1
+    log.info("1분봉 차트 파일 %d개", n)
+
+
 def write_page(items: list[dict], surge=None, jbc=None) -> None:
     tpl = (ROOT / "dashboard_template.html").read_text(encoding="utf-8")
     payload = _clean({"updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"), "items": items,
@@ -2485,6 +2505,10 @@ def write_page(items: list[dict], surge=None, jbc=None) -> None:
     OUT.write_text(tpl.replace("/*__DATA__*/null", data), encoding="utf-8")
     (OUT.parent / ".nojekyll").write_text("")
     log.info("대시보드 저장: %s (%d종목)", OUT, len(items))
+    try:
+        write_bars(items)
+    except Exception as e:
+        log.warning("1분봉 차트 저장 실패: %s", e)
 
 
 TELEGRAM_HOURS_KST = {21, 1, 5}   # 매시간 갱신해도 텔레그램 요약은 이 시간대에만 (수동 실행은 항상)
