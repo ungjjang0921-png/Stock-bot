@@ -206,6 +206,49 @@ def universe() -> list[dict]:
     return out
 
 
+DORMANT_TOP = 300                 # 🧲 거래 거의 없는 초소형주 (평소 거래량 5천~10만주) — 바닥매집 엔진만 봄
+DORMANT: dict = {}
+
+
+def dormant(skip: set) -> dict:
+    """평소엔 잠잠한 초소형주 (주가 $0.05~5 · 시총 $5천만 이하 · 10일 평균 거래량 5천~10만주)"""
+    f = [{"left": "exchange", "operation": "in_range", "right": EXCHANGES},
+         {"left": "type", "operation": "in_range", "right": ["stock", "dr"]},
+         {"left": "close", "operation": "in_range", "right": [0.05, MAX_PRICE]},
+         {"left": "average_volume_10d_calc", "operation": "in_range", "right": [5_000, MIN_AVG_VOL]},
+         {"left": "market_cap_basic", "operation": "less", "right": 50e6}]
+    rows = tv_scan(f, "average_volume_10d_calc", DORMANT_TOP)
+    return {r["t"]: r for r in rows if r["t"] not in skip}
+
+
+def fresh_filings(tickers, ciks: dict, today: date) -> dict:
+    """최근 2일 안 새 공시 (재료 가능성) — 호재·중립 공시는 가산, 증자 서류는 감점"""
+    c = cache_load("secf")
+    out = {}
+    for t in tickers:
+        cik = ciks.get(t)
+        if not cik:
+            continue
+        if cik not in c:
+            try:
+                c[cik] = filings(cik)[:20]
+            except Exception:
+                c[cik] = []
+        news = []
+        for f_ in c[cik]:
+            if days_ago(f_["date"], today) > 2:
+                continue
+            form = f_["form"]
+            if form in ("424B5", "424B4", "424B3", "S-1", "S-1/A", "F-1", "S-3", "F-3", "EFFECT"):
+                news.append({"side": "dil", "form": form, "date": f_["date"]})
+            elif form in ("8-K", "6-K", "SC 13D", "SC 13D/A", "10-Q", "10-K", "20-F"):
+                ko = ITEM_KO.get(f_["items"][:4], (None, ""))[1] if form == "8-K" else FORM_SIDE.get(form, (None, ""))[1]
+                news.append({"side": "news", "form": form, "date": f_["date"], "ko": ko})
+        if news:
+            out[t] = news
+    return out
+
+
 def _download(tickers: list[str], **kw) -> dict[str, pd.DataFrame]:
     out = {}
     for i in range(0, len(tickers), 100):
@@ -1790,6 +1833,12 @@ def analyze() -> list[dict]:
     tickers = [u["t"] for u in uni]
     prices = daily_cached(tickers)
     PRICES.update(prices)
+    try:                                            # 🧲 잠든 초소형주도 일봉만 받아서 바닥매집 엔진에 넣음
+        DORMANT.update(dormant(set(tickers)))
+        PRICES.update(daily_cached(list(DORMANT)))
+        log.info("잠든 초소형주 %d개 추가", len(DORMANT))
+    except Exception as e:
+        log.warning("잠든 초소형주 조회 실패: %s", e)
     save_caches()                                   # 중간에 끊겨도 받은 데이터는 남김
     mins = intraday(tickers)
     MINS.update(mins)
@@ -2639,7 +2688,20 @@ def main():
         except Exception as e:
             log.warning("시간외 급등 조회 실패: %s", e)
             EXT = {"mode": ext_mode()[0], "rows": []}
-        CATCH = catchmod.build(items, PRED, SQUEEZE, now_et, live, EXT)
+        acc = ((PRED or {}).get("scores") or {}).get("acc") or {}
+        hot = [t for t, r in acc.items() if r.get("p", 0) >= 80]
+        try:
+            FRESH = fresh_filings(hot, cache_get("cik", cik_map), datetime.now(ET).date())
+        except Exception as e:
+            log.warning("최근 공시 확인 실패: %s", e)
+            FRESH = {}
+        CATCH = catchmod.build(items, PRED, SQUEEZE, now_et, live, EXT, fresh=FRESH)
+        for z in CATCH.get("hz", {}).values():         # 잠든 초소형주는 이름·잠든 표시 채우기
+            for c in z.get("list", []):
+                d = DORMANT.get(c["t"])
+                if d:
+                    c["name"] = c.get("name") or d.get("name", "")
+                    c.setdefault("badge", []).append("잠든종목")
         CATCH["stat"] = catchmod.ledger(CATCH, PRICES, OUT.parent / "catch_log.json", now_et, now_et.date())
         CATCH["at"] = now_et.strftime("%m/%d %H:%M ET")
         CATCH["sess"] = {"pre": "프리장", "reg": "정규장", "night": "애프터·데이장"}[ext_mode(now_et)[0]]

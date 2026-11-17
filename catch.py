@@ -48,7 +48,8 @@ def ext_engine(ext: dict, by: dict, S1: dict) -> list:
     return rows
 
 
-def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, ext: dict | None = None) -> dict:
+def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, ext: dict | None = None,
+          fresh: dict | None = None) -> dict:
     by = {it["t"]: it for it in items}
     sc = (pred or {}).get("scores") or {}
     out = {"live": live, "hz": {}, "mode": (ext or {}).get("mode", "reg")}
@@ -79,7 +80,7 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, 
         if xrows and hz in ("0", "1"):     # 프장·애프터(데이장 대비) 급등
             eng["ext"] = xrows
         if hz in ("0", "1"):               # 🧲 바닥매집 — 아직 안 터진 바닥권 종목 중 매집 흔적 + 검증 모델 상위
-            acc = acc_rows(sc.get("acc") or {}, by)
+            acc = acc_rows(sc.get("acc") or {}, by, fresh or {})
             if acc:
                 eng["acc"] = acc
         if hz == "0":                      # 오늘 탭은 장중·시간외 엔진만 — RabbitStock과 같은 방식
@@ -123,7 +124,7 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, 
     return out
 
 
-def acc_rows(A: dict, by: dict) -> list:
+def acc_rows(A: dict, by: dict, fresh: dict) -> list:
     """바닥매집 점수 상위 — 모델 백분위 + 오늘 초기 거래량(프장·장 초반)이 붙기 시작하면 가산, 이미 +15% 넘게 간 건 제외"""
     rows = []
     for t, r in A.items():
@@ -135,8 +136,13 @@ def acc_rows(A: dict, by: dict) -> list:
         if chg is not None and (chg >= 15 or chg <= -8):        # 이미 터졌거나 무너지는 중
             continue
         trig = chg is not None and 1 <= chg < 15 and rv >= 1.5   # 오늘 거래량 붙으며 움직이기 시작
-        s = r["p"] + (8 if trig else 0) + min(r.get("absorb", 0), 4)
-        rows.append((s, t, dict(r, chg=round(chg, 1) if chg is not None else None, rv=round(rv, 1) if rv else None, trig=trig)))
+        nw = fresh.get(t) or []
+        news = [x for x in nw if x["side"] == "news"]
+        dil = [x for x in nw if x["side"] == "dil"]
+        s = r["p"] + (8 if trig else 0) + min(r.get("absorb", 0), 4) + (6 if news else 0) - (10 if dil else 0)
+        rows.append((s, t, dict(r, chg=round(chg, 1) if chg is not None else None, rv=round(rv, 1) if rv else None, trig=trig,
+                                news=[f"{x['form']}{' ' + x['ko'] if x.get('ko') else ''} ({x['date'][5:]})" for x in news][:3],
+                                dil=[f"{x['form']} ({x['date'][5:]})" for x in dil][:2])))
     return rows
 
 
