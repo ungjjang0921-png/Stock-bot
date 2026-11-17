@@ -21,8 +21,8 @@ log = logging.getLogger("catch")
 
 TOP = 20                       # 엔진별 상위 몇 개를 '포착'으로 볼지
 HIT = {"0": 15, "1": 20}       # 적중 기준: 오늘(진입가 대비 당일 고가 +15%), 1거래일(종가 대비 다음날 고가 +20%)
-ENG = ["preview", "ext", "signal", "best", "burn", "squeeze"]
-ENG_KO = {"preview": "프리뷰", "ext": "시간외", "signal": "시그널", "best": "베스트", "burn": "버닝업", "squeeze": "스퀴즈"}
+ENG = ["preview", "ext", "acc", "signal", "best", "burn", "squeeze"]
+ENG_KO = {"preview": "프리뷰", "ext": "시간외", "acc": "바닥매집", "signal": "시그널", "best": "베스트", "burn": "버닝업", "squeeze": "스퀴즈"}
 
 
 def _risk(it: dict) -> list[str]:
@@ -78,6 +78,10 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, 
             eng["preview"] = rows
         if xrows and hz in ("0", "1"):     # 프장·애프터(데이장 대비) 급등
             eng["ext"] = xrows
+        if hz in ("0", "1"):               # 🧲 바닥매집 — 아직 안 터진 바닥권 종목 중 매집 흔적 + 검증 모델 상위
+            acc = acc_rows(sc.get("acc") or {}, by)
+            if acc:
+                eng["acc"] = acc
         if hz == "0":                      # 오늘 탭은 장중·시간외 엔진만 — RabbitStock과 같은 방식
             if out["mode"] == "night":     # 밤(애프터·데이장)엔 낮 장중 흐름이 끝났으니 시간외 엔진만
                 eng.pop("preview", None)
@@ -114,11 +118,26 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, 
             rows.append((det, t, {"det": det, "p5": round(p5, 1), "chg": round(chg, 1), "fl": fl if fl < 9e9 else None,
                                   "q": b.get("q"), "n": b.get("n"), "sim": b.get("sim")}))
         eng["burn"] = rows
-        # 🩳 스퀴즈
-        eng["squeeze"] = [(c["score"], c["t"], {"score": c["score"], "si": c.get("si"), "fee": c.get("fee"),
-                                                 "st": c.get("st")}) for c in (squeeze or [])]
+        # 🩳 스퀴즈 엔진은 뺌 — 실제 기록 상위5 적중률 5% (11/06~11/16)
         _finish(out, hz, eng, by, S, sc, xrows)
     return out
+
+
+def acc_rows(A: dict, by: dict) -> list:
+    """바닥매집 점수 상위 — 모델 백분위 + 오늘 초기 거래량(프장·장 초반)이 붙기 시작하면 가산, 이미 +15% 넘게 간 건 제외"""
+    rows = []
+    for t, r in A.items():
+        if r["p"] < 80:
+            continue
+        it = by.get(t) or {}
+        sn = it.get("snap") or {}
+        chg, rv = sn.get("chg"), sn.get("relvol") or 0
+        if chg is not None and (chg >= 15 or chg <= -8):        # 이미 터졌거나 무너지는 중
+            continue
+        trig = chg is not None and 1 <= chg < 15 and rv >= 1.5   # 오늘 거래량 붙으며 움직이기 시작
+        s = r["p"] + (8 if trig else 0) + min(r.get("absorb", 0), 4)
+        rows.append((s, t, dict(r, chg=round(chg, 1) if chg is not None else None, rv=round(rv, 1) if rv else None, trig=trig)))
+    return rows
 
 
 def _finish(out, hz, eng, by, S, sc, xrows=None):
@@ -158,7 +177,7 @@ def _finish(out, hz, eng, by, S, sc, xrows=None):
     # 하락 신호 1개 붙은 종목만 아래로 (꼬리표는 상관없음) → 많이 포착된 순 → 평균 순위
     lst.sort(key=lambda x: (len(x["fall"]), -x["n"], x["avg"]))
     out["hz"][hz] = {"list": lst[:60], "dropped": dropped[:20], "counts": {k: min(len(v), TOP) for k, v in eng.items()},
-                     "only": (["preview", "ext"] if hz == "0" else None)}
+                     "only": (["preview", "ext", "acc"] if hz == "0" else None)}
 
 
 def falling(it: dict, r: dict, xe: dict, px: float) -> list[str]:

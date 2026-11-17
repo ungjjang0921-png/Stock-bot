@@ -551,12 +551,13 @@ function deepBlock(it){
     <div class="ds"><div class="dt">보유자·내부자 <small>13D/G·Form 4·144 — 누가 사고 누가 파나</small></div>${hs || '<div style="font-size:11.5px;color:var(--muted)">최근 1년 보유자 공시 없음</div>'}</div>
   </div>`;
 }
-const EN = [["preview","👁","프리뷰","장중 급등 흐름 — 오늘 오르는 종목 중 +20% 터치 비율·상승·거래량"],["ext","🌙","시간외","프장·애프터(데이장 대비) 급등 — 시간외 상승률 × 거래량 + 모델 점수"],["signal","📈","시그널","학습 모델 — 급등 판별 점수(백분위)·검증 확률"],["best","🏅","베스트","유사 사례 150건 — +30% 사례율·목표 선도달률"],["burn","🔥","버닝업","강하게 치솟는 종목 — 5일 확률 70 + 당일 상승 20 + 유통 10"],["squeeze","🩳","스퀴즈","공매도·대차 이자·유통 — 숏커버 압력"]];
+const EN = [["preview","👁","프리뷰","장중 급등 흐름 — 오늘 오르는 종목 중 +20% 터치 비율·상승·거래량"],["ext","🌙","시간외","프장·애프터(데이장 대비) 급등 — 시간외 상승률 × 거래량 + 모델 점수"],["acc","🧲","바닥매집","바닥권에서 조용히 매집된 뒤 다음 거래일 +20% 터질 확률 — 5년 학습 · 최근 60거래일 검증"],["signal","📈","시그널","학습 모델 — 급등 판별 점수(백분위)·검증 확률"],["best","🏅","베스트","유사 사례 150건 — +30% 사례율·목표 선도달률"],["burn","🔥","버닝업","강하게 치솟는 종목 — 5일 확률 70 + 당일 상승 20 + 유통 10"]];
 function catchDetail(c, hz){
   const e = c.eng, out = [];
   const pc = v => v == null ? "-" : `${v >= 0 ? "+" : ""}${(+v).toFixed(1)}%`;
   if (e.preview) out.push(["preview", `오늘 <b class="up">+${e.preview.chg}%</b> · 비슷한 장중 상황 +20% 터치 비율 <b>${e.preview.reg ?? "-"}%</b>${e.preview.pre != null ? ` · 프리장 +10% ${e.preview.pre}%` : ""} · VWAP ${e.preview.vwap ? "위 ✅" : "아래"} · 거래량 ${e.preview.rv ?? "-"}배`]);
   if (e.ext) out.push(["ext", `${e.ext.mode === "pre" ? "프리장" : "애프터"} <b class="up">+${e.ext.chg}%</b> · 시간외 거래량 ${(e.ext.vol / 1e3).toFixed(0)}K주 · 시간외 가격 ${usd(e.ext.px)} · 모델 백분위 ${e.ext.p}${e.ext.mode === "night" ? "<br><small style=\"color:var(--muted)\">애프터에서 오른 종목은 한국 낮 데이장(주간거래)·다음 프장에서 이어질 수 있어요. 데이장 실시간 가격은 무료 데이터가 없어 애프터 마감가 기준이에요.</small>" : ""}`]);
+  if (e.acc) out.push(["acc", `바닥매집 백분위 <b>${e.acc.p}</b>/100${e.acc.prob != null ? ` · 이 점수대 검증 적중 <b>${e.acc.prob}%</b>` : ""}${e.acc.trig ? ` · <b class="up">오늘 거래량 붙으며 출발 ${pc(e.acc.chg)} (×${e.acc.rv})</b>` : ""}<br>6개월 저점 대비 ${pc(e.acc.low)} · 1년 고점 대비 ${pc(e.acc.dd)} · 최근 20일 매집일 <b>${e.acc.absorb}일</b> · 최근 5일 거래량 평소의 ${e.acc.dry}배 · 10일 변동폭 ${Math.round(e.acc.sq * 100)}% (60일 대비)${(e.acc.why || []).length ? `<br><small style="color:var(--muted)">근거: ${e.acc.why.map(esc).join(" · ")}</small>` : ""}`]);
   if (e.signal) out.push(["signal", `판별 백분위 <b>${e.signal.p}</b>/100 · 패턴 <b>${esc(e.signal.pat || "-")}</b><br>검증 확률 1일 ${e.signal.probs["1"] ?? "-"}% · 5일 ${e.signal.probs["5"] ?? "-"}% · 10일 ${e.signal.probs["10"] ?? "-"}% <small>(표본 부족하면 -)</small>`]);
   if (e.best) out.push(["best", `+30% 사례율 <b>${e.best.r30}%</b> · 목표 선도달률(−10% 손절보다 +30% 먼저) <b>${e.best.ft}%</b><br>전체 사례 최고 상승 P20~P80 ${pc(e.best.q[0])} ~ ${pc(e.best.q[2])}${e.best.cq ? ` · 급등한 경우 중앙 ${pc(e.best.cq[1])}` : ""} · 유사도 ${e.best.sim}`]);
   if (e.burn) out.push(["burn", `감지점수 <b>${e.burn.det}</b>/100 (5일 백분위 ${e.burn.p5} · 당일 ${pc(e.burn.chg)} · 유통 ${e.burn.fl ? (e.burn.fl / 1e6).toFixed(1) + "M" : "-"})${e.burn.q ? `<br>비슷한 급등 ${e.burn.n}건 이후 최고 중앙 ${pc(e.burn.q[1])} (25~75% ${pc(e.burn.q[0])} ~ ${pc(e.burn.q[2])})` : ""}`]);
@@ -1076,7 +1077,7 @@ function render(){
     const lab = {"0": C.mode === "pre" ? "오늘 · 프장" : C.mode === "night" ? "데이장·프장 대비" : "오늘", "1": "1거래일", "5": "5거래일", "10": "10거래일"};
     const Z = HZ[CH] || {list: [], counts: {}};
     $("#sub").textContent = `${DATA.updated} 업데이트 · ${C.sess || ""} ${C.at ? "(" + C.at + ")" : ""}`;
-    let h = `<div class="intro">📡 <b>포착</b> — 5개 엔진이 각자 상위 20개를 고르고, <b>여러 엔진이 같이 잡은 종목</b>을 위로 올려요 (많이 포착된 순 → 평균 순위). 카드를 누르면 엔진별 근거가 나와요.<br><span style="color:var(--muted)">칸 색: 진한 빨강 1~3위 · 빨간 테두리 4~10위 · 회색 11~20위. 🎯 = 3개 이상 엔진이 겹치고 경고 없음<br>📉 지금 떨어지려는 신호(하락 중·VWAP 아래·고점 대비 밀림·윗꼬리 마감·급등 뒤 꺾임·거래량 터지며 하락)가 2개 이상이면 추천에서 빼고 맨 아래 따로 보여줘요. ATM·물량출회 꼬리표는 순위와 상관없이 표시만 해요.</span></div>
+    let h = `<div class="intro">📡 <b>포착</b> — 여러 엔진이 각자 상위 20개를 고르고, <b>여러 엔진이 같이 잡은 종목</b>을 위로 올려요 (많이 포착된 순 → 평균 순위). 카드를 누르면 엔진별 근거가 나와요.<br><span style="color:var(--muted)">칸 색: 진한 빨강 1~3위 · 빨간 테두리 4~10위 · 회색 11~20위. 🎯 = 3개 이상 엔진이 겹치고 경고 없음<br>📉 지금 떨어지려는 신호(하락 중·VWAP 아래·고점 대비 밀림·윗꼬리 마감·급등 뒤 꺾임·거래량 터지며 하락)가 2개 이상이면 추천에서 빼고 맨 아래 따로 보여줘요. ATM·물량출회 꼬리표는 순위와 상관없이 표시만 해요.</span></div>
       <div class="cz">${["0","1","5","10"].map(k => `<span class="${CH === k ? "on" : ""}" onclick="CH='${k}';render()" style="${k === "0" && C.mode !== "reg" ? "font-size:11px" : ""}">${lab[k]}<small>${(HZ[k] || {list: []}).list.length}</small></span>`).join("")}</div>`;
     const S = (C.stat || {})[CH === "0" ? (C.mode === "pre" ? "p" : C.mode === "night" ? "n" : "0") : CH];
     if (S && S.all && S.all.n) {
@@ -1085,9 +1086,14 @@ function render(){
         전체 ${r(S.all)} · 엔진 1개 ${r(S.by_n["1"])} · 2개 ${r(S.by_n["2"])} · <b>3개 이상 ${r(S.by_n["3"])}</b> · 🎯 ${r(S.focus)}<br>
         <span style="color:var(--muted)">엔진별(10위 안): ${EN.map(([k, , n]) => `${n} ${S.eng[k] && S.eng[k].n ? S.eng[k].r + "%" : "-"}`).join(" · ")}</span></div>`;
     } else if (CH === "0" || CH === "1") h += `<div class="cst" style="color:var(--muted)">📊 ${CH === "0" ? (C.mode === "pre" ? "프장 목록은 미국 08:30~09:30 사이" : C.mode === "night" ? "데이장 대비 목록은 애프터 이후(미국 20시~새벽 4시)" : "오늘 탭은 정규장 시작 15분 뒤") : "1거래일 탭은 장 마감 뒤"} 목록을 고정해서 실제 결과로 엔진별 적중률을 매겨요. 며칠 쌓이면 여기에 성적이 나와요.</div>`;
+    const AE = (DATA.pred || {}).acc_eval;
+    if (AE && (CH === "0" || CH === "1")){
+      const m = AE.models[AE.model] || {};
+      h += `<div class="cst">🧲 <b>바닥매집 엔진 검증</b> — 바닥권(6개월 저점 +60% 안·1년 고점 −30% 아래)·아직 안 터진 종목 중 점수 상위 ${AE.top}개를 매일 골랐을 때, 최근 60거래일(${esc(AE.eval_from)}~) 다음날 고가 +${AE.th}% 적중 <b>${m.rate}%</b> <small>(${m.k}/${m.n} · 95% 범위 ${m.lo}~${m.hi}%)</small> vs 바닥권 아무거나 <b>${AE.base}%</b><br><span style="color:var(--muted)">학습 ${AE.train_n.toLocaleString()}일 중 급등 ${AE.train_pos.toLocaleString()}건 · 모델 ${esc(AE.model)} · 오늘 후보 풀 ${AE.pool}개 · 미래 데이터는 학습에 안 씀</span></div>`;
+    }
     if (CH === "0") h += `<div class="cst" style="color:var(--muted)">${C.mode === "pre" ? "🌅 <b style=\"color:var(--text)\">프리장 포착</b> — 지금 프리장에서 +5% 이상 오르고 거래량이 붙은 종목(🌙 시간외 엔진)과, 비슷한 프리장 상황에서 +10%를 친 비율이 높은 종목(👁 프리뷰)을 같이 봐요. 본장 시작 전 한 번(미국 08:30~09:30) 목록을 고정해서 본장 고가로 채점해요."
       : C.mode === "night" ? "🌙 <b style=\"color:var(--text)\">데이장·다음 프장 대비 포착</b> — 애프터에서 +5% 이상 오르고 거래량이 붙은 종목을 시간외 엔진이 골라요. 한국 낮 데이장(주간거래)과 저녁 프장에서 이어질 후보예요. 데이장 실시간 가격은 무료로 받을 수 있는 곳이 없어서 애프터 마감가를 진입가로 써요."
-      : "오늘 탭은 RabbitStock처럼 <b style=\"color:var(--text)\">장중 엔진(프리뷰)만</b> 순위를 매겨요. 오늘 +3% 이상 오르고 VWAP 위에 있는 종목 중, 비슷한 장중 상황에서 +20%를 친 비율·당일 상승·거래량으로 줄 세워요."}</div>`;
+      : "오늘 탭은 <b style=\"color:var(--text)\">👁 프리뷰</b>(오늘 +3% 이상·VWAP 위·비슷한 장중 상황 +20% 비율)와 <b style=\"color:var(--text)\">🧲 바닥매집</b>(아직 안 터진 바닥권 매집 종목, 오늘 거래량 붙으면 가산)으로 줄 세워요."}</div>`;
     if (CH === "0" && !C.live) h += `<div class="cst" style="color:var(--muted)">지금은 미국 장이 닫혀 있어서 오늘 탭은 마지막 장중 기준이에요. 프리장(한국 오후 6시)부터 다시 채워져요.</div>`;
     h += `<div class="ce"><span class="${CE === "all" ? "on" : ""}" onclick="CE='all';render()">모든 엔진</span>${EN.map(([k, ic, n]) => `<span class="${CE === k ? "on" : ""}" onclick="CE='${k}';render()">${ic} ${n} ${Z.counts[k] != null ? Z.counts[k] : "-"}</span>`).join("")}</div>
       <div style="display:flex;gap:6px;margin-bottom:4px"><input id="cq" placeholder="🔍 티커·회사명 검색" value="${esc(window.CQ || "")}" oninput="CQ=this.value;catchFilter()" style="flex:1;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px"><select onchange="CS=this.value;render()" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px">

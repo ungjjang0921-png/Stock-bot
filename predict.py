@@ -27,12 +27,16 @@ PICK_PER_DAY = 10
 CAND_TOP = 30
 LOG_TOP = 20
 FEATS = ["ret1", "ret5", "ret20", "relvol", "vol20", "range20", "dlow", "dhigh", "ma20", "ma50", "rsi", "cp",
-         "updown", "obv", "logp", "dvol", "gap", "rsi20", "rsimin5", "pump"]
+         "updown", "obv", "logp", "dvol", "gap", "rsi20", "rsimin5", "pump",
+         "absorb", "dryup", "squeeze", "hlow", "obvdiv", "adl", "base", "dd250"]
 FEAT_KO = {"ret1": "전일 등락", "ret5": "5일 수익률", "ret20": "20일 수익률", "relvol": "거래량 배수",
            "vol20": "변동성", "range20": "20일 고저폭", "dlow": "6개월 저점 대비", "dhigh": "6개월 고점 대비",
            "ma20": "20일선 이격", "ma50": "50일선 이격", "rsi": "RSI", "cp": "종가 위치", "updown": "상승일 거래량 우위",
            "obv": "OBV 기울기", "logp": "주가 수준", "dvol": "거래대금", "gap": "시가 갭",
-           "rsi20": "RSI 20 근처", "rsimin5": "최근 5일 RSI 저점", "pump": "과거 급등 크기"}
+           "rsi20": "RSI 20 근처", "rsimin5": "최근 5일 RSI 저점", "pump": "과거 급등 크기",
+           "absorb": "매집일(거래량↑·가격 버팀)", "dryup": "매도 고갈(거래량 마름)", "squeeze": "변동폭 수축",
+           "hlow": "저점 높이기", "obvdiv": "OBV 상승 다이버전스", "adl": "종가 위쪽 마감(매집선)",
+           "base": "바닥 다지기 기간", "dd250": "1년 고점 대비 낙폭"}
 RSI_ZONE = (12, 28)      # 'RSI 20 근처' 구간
 
 
@@ -66,6 +70,22 @@ def features(df: pd.DataFrame) -> pd.DataFrame:
     f["rsi20"] = np.exp(-((rsi100 - 20) / 7) ** 2)                 # RSI 20에 가까울수록 1
     f["rsimin5"] = f["rsi"].rolling(5).min()
     f["pump"] = np.log((h / c.shift(1)).rolling(250, min_periods=60).max())   # 지난 1년 하루 최대 급등폭
+    # ── 🧲 바닥 매집 흔적 ──
+    v50 = v.rolling(50, min_periods=20).mean().shift(1)
+    absorb_day = (v >= 2 * v50) & (r1.abs() <= 0.06) & (f["cp"] >= 0.5)          # 거래량 터졌는데 가격은 안 밀림
+    f["absorb"] = absorb_day.astype(float).rolling(20).sum()
+    f["dryup"] = np.log((v.rolling(5).mean() + 1) / (v50 + 1))                   # 최근 5일 거래량 / 50일 평균
+    f["squeeze"] = np.log((h.rolling(10).max() / l.rolling(10).min()) / (h.rolling(60).max() / l.rolling(60).min()).replace(0, np.nan))
+    f["hlow"] = l.rolling(5).min() / l.rolling(20).min() - 1                     # 최근 저점이 20일 저점보다 위
+    obv60 = (obv - obv.shift(60)) / v.rolling(60).sum().replace(0, np.nan)
+    f["obvdiv"] = obv60 - np.tanh((c / c.shift(60) - 1) * 2)                     # 가격은 빠졌는데 OBV는 버팀
+    clv = ((2 * c - h - l) / (h - l).replace(0, np.nan)).fillna(0)
+    f["adl"] = (clv * v).rolling(20).sum() / v.rolling(20).sum().replace(0, np.nan)
+    lo126 = l.rolling(126, min_periods=40).min()
+    since = (l == lo126).astype(int)
+    grp = since.cumsum()
+    f["base"] = np.log1p(since.groupby(grp).cumcount())                          # 6개월 최저가 이후 지난 날 수
+    f["dd250"] = np.log(c / h.rolling(250, min_periods=60).max())
     for H in HORIZONS:
         fh = h[::-1].rolling(H, min_periods=H).max()[::-1].shift(-1)
         f[f"g{H}"] = fh / c - 1
@@ -323,6 +343,10 @@ def run(prices: dict[str, pd.DataFrame], info: dict[str, dict], cutoff: date, lo
             "pk_med": round(pk_med * 100, 1), "dd_med": round(dd_med, 1), "big": big_ratio, "rsi_stat": rsi_stat,
             "imp": [{"f": FEAT_KO[f], "w": round(float(v), 2)} for f, v in imp],
             "train_n": int(len(tr)), "train_pos": int(ytr.sum()), "eval_from": ev_start.isoformat()}
+    try:
+        acc_engine(A, latest, out)
+    except Exception as e:
+        log.warning("바닥매집 엔진 실패: %s", e)
     out["ledger"] = ledger(out, prices, log_path)
     try:
         out["fail"] = failure_analysis(log_path, A)
@@ -599,3 +623,77 @@ def engine_scores(latest, Xn_now, p_now, cal, tr, Xn_tr, gcol, ftcol, H) -> dict
                                "n": BURN_K, "sim": round(100 / (1 + float(np.sqrt(max(bd[np.argpartition(bd, BURN_K)[:BURN_K]].mean(), 0)))), 1)}
             out[t] = rec
     return out
+
+
+# ── 🧲 바닥매집: 바닥권에서 조용히 매집된 뒤 '다음 거래일' 터질 종목 ──
+ACC_TH = 0.20            # 다음 거래일 고가 +20%
+ACC_TOP = 10
+
+
+def _acc_mask(X):
+    """바닥권 · 아직 안 터짐: 6개월 저점에서 +60% 이내, 1년 고점보다 30% 이상 아래, 전일 -10%~+12%"""
+    return (X["dlow"] <= np.log(1.6)) & (X["dd250"] <= np.log(0.7)) & X["ret1"].between(-0.10, 0.12)
+
+
+def acc_engine(A, latest, out):
+    lab = A.dropna(subset=["g1"])
+    lab = lab[_acc_mask(lab)]
+    dates = sorted(lab.index.get_level_values("date").unique())
+    if len(dates) < 300:
+        return
+    ev_start = dates[-EVAL_DAYS]
+    tr = lab[lab.index.get_level_values("date") < ev_start - timedelta(days=3)]
+    ev = lab[lab.index.get_level_values("date") >= ev_start]
+    q0, q1 = tr[FEATS].quantile(0.005), tr[FEATS].quantile(0.995)
+    mu, sd = tr[FEATS].clip(q0, q1, axis=1).mean(), tr[FEATS].clip(q0, q1, axis=1).std().replace(0, 1)
+    norm = lambda X: ((X[FEATS].clip(q0, q1, axis=1) - mu) / sd).fillna(0).values
+    ytr = (tr["g1"] >= ACC_TH).astype(float).values
+    Xtr, Xev = norm(tr), norm(ev)
+    w, b = _logit_fit(Xtr, ytr)
+    cand = {"로지스틱": (lambda Z: Z @ w + b)}
+    gb = _gbm(Xtr, ytr)
+    if gb is not None:
+        cand["부스팅"] = (lambda Z: gb.predict_proba(Z)[:, 1])
+    yev = ev["g1"].values >= ACC_TH
+    base = float(yev.mean()) * 100
+    best, best_r = None, -1
+    res = {}
+    for k, fn in cand.items():
+        sel = ev.assign(s=fn(Xev)).groupby(level="date", group_keys=False).apply(lambda g: g.nlargest(ACC_TOP, "s"))
+        hit = sel["g1"] >= ACC_TH
+        kk, nn = int(hit.sum()), int(len(sel))
+        lo, hi = _wilson(kk, nn)
+        res[k] = {"rate": round(kk / max(nn, 1) * 100, 1), "k": kk, "n": nn, "lo": lo, "hi": hi,
+                  "avg_hi": round(float(sel["g1"].median()) * 100, 1)}
+        if res[k]["rate"] > best_r:
+            best, best_r = k, res[k]["rate"]
+    fn = cand[best]
+    s_ev = fn(Xev)
+    srt = np.sort(s_ev)
+    pct = lambda s: np.searchsorted(srt, s) / max(len(srt), 1) * 100
+    p_ev = pct(s_ev)
+    cal = {}
+    for lo_ in (99, 98, 95, 90, 80):
+        m = p_ev >= lo_
+        if m.sum() >= 40:
+            cal[lo_] = round(float(yev[m].mean()) * 100, 1)
+    now = latest[_acc_mask(latest)]
+    sc = {}
+    if len(now):
+        s_now = fn(norm(now))
+        p_now = pct(s_now)
+        contrib = norm(now) * w
+        for i, t in enumerate(now.index):
+            r = now.iloc[i]
+            p = round(float(p_now[i]), 1)
+            bk = next((k for k in sorted(cal, reverse=True) if p >= k), None)
+            top = [FEAT_KO[f] for f, v in sorted(zip(FEATS, contrib[i]), key=lambda x: -x[1])[:4] if v > 0]
+            sc[t] = {"p": p, "prob": cal.get(bk) if bk is not None else None, "why": top,
+                     "absorb": int(r["absorb"]), "dry": round(float(np.expm1(r["dryup"]) + 1), 2),
+                     "sq": round(float(np.exp(r["squeeze"])), 2), "low": round(float(np.expm1(r["dlow"])) * 100, 1),
+                     "dd": round(float(np.expm1(r["dd250"])) * 100, 1), "px": float(r["close"])}
+    out.setdefault("scores", {})["acc"] = sc
+    out["acc_eval"] = {"model": best, "models": res, "base": round(base, 1), "cal": {str(k): v for k, v in cal.items()},
+                       "th": int(ACC_TH * 100), "top": ACC_TOP, "train_n": int(len(tr)), "train_pos": int(ytr.sum()),
+                       "eval_from": ev_start.isoformat(), "pool": int(len(now))}
+    log.info("🧲 바닥매집: 검증 상위%d 적중 %s%% (바닥권 전체 %.1f%%) · 오늘 후보 %d", ACC_TOP, best_r, base, len(now))
