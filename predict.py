@@ -347,6 +347,10 @@ def run(prices: dict[str, pd.DataFrame], info: dict[str, dict], cutoff: date, lo
         acc_engine(A, latest, out)
     except Exception as e:
         log.warning("바닥매집 엔진 실패: %s", e)
+    try:
+        big_engine(A, latest, out)
+    except Exception as e:
+        log.warning("대박 엔진 실패: %s", e)
     out["ledger"] = ledger(out, prices, log_path)
     try:
         out["fail"] = failure_analysis(log_path, A)
@@ -636,8 +640,26 @@ def _acc_mask(X):
 
 
 def acc_engine(A, latest, out):
+    _engine(A, latest, out, "acc", ACC_TH, _acc_mask)
+
+
+BIG_TH = 0.50            # 🎯 다음 거래일 고가 +50%
+BIG_YEARS = 3
+
+
+def _big_mask(X):
+    """대박 후보 풀: 주가 $0.05~10 · 전일 −30%~+60% (이미 몇 배 뛴 건 제외)"""
+    return X["close"].between(0.05, 10) & X["ret1"].between(-0.30, 0.60)
+
+
+def big_engine(A, latest, out):
+    since = A.index.get_level_values("date").max() - timedelta(days=365 * BIG_YEARS)
+    _engine(A[A.index.get_level_values("date") >= since], latest, out, "big", BIG_TH, _big_mask)
+
+
+def _engine(A, latest, out, key, TH, mask):
     lab = A.dropna(subset=["g1"])
-    lab = lab[_acc_mask(lab)]
+    lab = lab[mask(lab)]
     dates = sorted(lab.index.get_level_values("date").unique())
     if len(dates) < 300:
         return
@@ -647,20 +669,20 @@ def acc_engine(A, latest, out):
     q0, q1 = tr[FEATS].quantile(0.005), tr[FEATS].quantile(0.995)
     mu, sd = tr[FEATS].clip(q0, q1, axis=1).mean(), tr[FEATS].clip(q0, q1, axis=1).std().replace(0, 1)
     norm = lambda X: ((X[FEATS].clip(q0, q1, axis=1) - mu) / sd).fillna(0).values
-    ytr = (tr["g1"] >= ACC_TH).astype(float).values
+    ytr = (tr["g1"] >= TH).astype(float).values
     Xtr, Xev = norm(tr), norm(ev)
     w, b = _logit_fit(Xtr, ytr)
     cand = {"로지스틱": (lambda Z: Z @ w + b)}
     gb = _gbm(Xtr, ytr)
     if gb is not None:
         cand["부스팅"] = (lambda Z: gb.predict_proba(Z)[:, 1])
-    yev = ev["g1"].values >= ACC_TH
+    yev = ev["g1"].values >= TH
     base = float(yev.mean()) * 100
     best, best_r = None, -1
     res = {}
     for k, fn in cand.items():
         sel = ev.assign(s=fn(Xev)).groupby(level="date", group_keys=False).apply(lambda g: g.nlargest(ACC_TOP, "s"))
-        hit = sel["g1"] >= ACC_TH
+        hit = sel["g1"] >= TH
         kk, nn = int(hit.sum()), int(len(sel))
         lo, hi = _wilson(kk, nn)
         res[k] = {"rate": round(kk / max(nn, 1) * 100, 1), "k": kk, "n": nn, "lo": lo, "hi": hi,
@@ -677,7 +699,7 @@ def acc_engine(A, latest, out):
         m = p_ev >= lo_
         if m.sum() >= 40:
             cal[lo_] = round(float(yev[m].mean()) * 100, 1)
-    now = latest[_acc_mask(latest)]
+    now = latest[mask(latest)]
     sc = {}
     if len(now):
         s_now = fn(norm(now))
@@ -692,8 +714,8 @@ def acc_engine(A, latest, out):
                      "absorb": int(r["absorb"]), "dry": round(float(np.expm1(r["dryup"]) + 1), 2),
                      "sq": round(float(np.exp(r["squeeze"])), 2), "low": round(float(np.expm1(r["dlow"])) * 100, 1),
                      "dd": round(float(np.expm1(r["dd250"])) * 100, 1), "px": float(r["close"])}
-    out.setdefault("scores", {})["acc"] = sc
-    out["acc_eval"] = {"model": best, "models": res, "base": round(base, 1), "cal": {str(k): v for k, v in cal.items()},
-                       "th": int(ACC_TH * 100), "top": ACC_TOP, "train_n": int(len(tr)), "train_pos": int(ytr.sum()),
+    out.setdefault("scores", {})[key] = sc
+    out[key + "_eval"] = {"model": best, "models": res, "base": round(base, 1), "cal": {str(k): v for k, v in cal.items()},
+                       "th": int(TH * 100), "top": ACC_TOP, "train_n": int(len(tr)), "train_pos": int(ytr.sum()),
                        "eval_from": ev_start.isoformat(), "pool": int(len(now))}
-    log.info("🧲 바닥매집: 검증 상위%d 적중 %s%% (바닥권 전체 %.1f%%) · 오늘 후보 %d", ACC_TOP, best_r, base, len(now))
+    log.info("%s 엔진: 검증 상위%d 다음날 +%d%% 적중 %s%% (풀 전체 %.1f%%) · 오늘 후보 %d", key, ACC_TOP, int(TH * 100), best_r, base, len(now))

@@ -114,7 +114,9 @@ def _summ(nb: list) -> dict | None:
         k = (f["ls"] * SLOT // 60, f["hs"] * SLOT // 60)
         combo[k] = combo.get(k, 0) + 1
     best = max(combo.values())
+    up = np.array([float(np.max(f["hi"])) for f in F])
     return {"ls": q(ls), "lr": q(lr), "hs": q(hs), "hr": q(hr), "n": len(F), "combo": best,
+            "p50": float((up >= np.log(1.5)).mean()), "p30": float((up >= np.log(1.3)).mean()),
             "same": sum(1 for p in nb if p.get("same"))}
 
 
@@ -190,6 +192,7 @@ def build(frames: dict, now_et: datetime, names: dict | None = None, want: set |
             "lo_hi": round((np.exp(sm["hr"][1]) - 1) * 100, 2),
             "ret_low": round((np.exp(sm["hr"][1]) - 1) * 100 - FEE, 2),
             "ret_now": round((np.exp(sm["lr"][1] + sm["hr"][1]) - 1) * 100 - FEE, 2),
+            "p50": round(sm["p50"] * 100), "p30": round(sm["p30"] * 100),
             "combo": sm["combo"], "n": sm["n"], "same": sm["same"], "notes": notes, "rv": round(float(np.expm1(rel_v)), 2),
             "soon": round((sm["ls"][1] - s_now) * SLOT),
             "an": [{"t": p["t"], "d": p["d"].strftime("%m/%d"), "lt": k_(_slot_time(p["d"], p["fut"]["ls"]))[6:],
@@ -197,7 +200,7 @@ def build(frames: dict, now_et: datetime, names: dict | None = None, want: set |
                     "lr": round((np.exp(p["fut"]["lr"]) - 1) * 100, 1), "hr": round((np.exp(p["fut"]["hr"]) - 1) * 100, 1)}
                    for p in nb if p["fut"]][:K],
         })
-    out["rows"].sort(key=lambda r: -r["ret_now"])
+    out["rows"].sort(key=lambda r: (-r["p50"], -r["ret_now"]))
     try:
         out["val"] = validate(G, avgv, s_now, today)
     except Exception as e:
@@ -222,6 +225,7 @@ def validate(G, avgv, s, today) -> dict | None:
     sd = (max(float(S.var()), 1e-5), np.maximum(X.var(0), 1e-5))
     n = fill = win = 0
     rets, rets_now, in_t = [], [], 0
+    cal50 = []
     for q in allP:
         if q["d"] not in days or not q["fut"] or q["day"]["n"] < 20:
             continue
@@ -235,6 +239,8 @@ def validate(G, avgv, s, today) -> dict | None:
             continue
         n += 1
         f = q["fut"]
+        big = float(np.max(f["hi"])) >= np.log(1.5)
+        cal50.append((sm["p50"], big))
         lo_t, hi_t = sm["lr"][1], sm["hr"][1]
         if sm["ls"][0] <= f["ls"] <= sm["ls"][2]:
             in_t += 1
@@ -258,4 +264,17 @@ def validate(G, avgv, s, today) -> dict | None:
     return {"n": n, "days": len(days), "lib": len(G), "fill": round(fill / n * 100, 1), "win": round(win / max(fill, 1) * 100, 1),
             "avg": md(rets), "med": round(float(np.median(rets)), 2) if rets else None,
             "avg_now": md(rets_now), "pos_now": round(sum(1 for x in rets_now if x > 0) / max(len(rets_now), 1) * 100, 1),
-            "time_in": round(in_t / n * 100, 1)}
+            "time_in": round(in_t / n * 100, 1), "p50": _cal(cal50)}
+
+
+def _cal(c):
+    """+50% 확률 검증: 예측 확률이 높았던 경우 실제로 몇 % 터졌나"""
+    if not c:
+        return None
+    base = sum(b for _, b in c) / len(c) * 100
+    out = {"base": round(base, 1), "n": len(c)}
+    for th in (0.25, 0.4):
+        sel = [b for p, b in c if p >= th]
+        if len(sel) >= 5:
+            out[str(int(th * 100))] = {"n": len(sel), "hit": round(sum(sel) / len(sel) * 100, 1)}
+    return out

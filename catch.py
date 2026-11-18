@@ -21,8 +21,8 @@ log = logging.getLogger("catch")
 
 TOP = 20                       # 엔진별 상위 몇 개를 '포착'으로 볼지
 HIT = {"0": 15, "1": 20}       # 적중 기준: 오늘(진입가 대비 당일 고가 +15%), 1거래일(종가 대비 다음날 고가 +20%)
-ENG = ["preview", "ext", "acc", "signal", "best", "burn", "squeeze"]
-ENG_KO = {"preview": "프리뷰", "ext": "시간외", "acc": "바닥매집", "signal": "시그널", "best": "베스트", "burn": "버닝업", "squeeze": "스퀴즈"}
+ENG = ["preview", "ext", "big", "acc", "signal", "best", "burn", "squeeze"]
+ENG_KO = {"preview": "프리뷰", "ext": "시간외", "big": "대박50", "acc": "바닥매집", "signal": "시그널", "best": "베스트", "burn": "버닝업", "squeeze": "스퀴즈"}
 
 
 def _risk(it: dict) -> list[str]:
@@ -83,6 +83,9 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, 
             acc = acc_rows(sc.get("acc") or {}, by, fresh or {})
             if acc:
                 eng["acc"] = acc
+            big = big_rows(sc.get("big") or {}, by, fresh or {})
+            if big:
+                eng["big"] = big
         if hz == "0":                      # 오늘 탭은 장중·시간외 엔진만 — RabbitStock과 같은 방식
             if out["mode"] == "night":     # 밤(애프터·데이장)엔 낮 장중 흐름이 끝났으니 시간외 엔진만
                 eng.pop("preview", None)
@@ -122,6 +125,25 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, 
         # 🩳 스퀴즈 엔진은 뺌 — 실제 기록 상위5 적중률 5% (11/06~11/16)
         _finish(out, hz, eng, by, S, sc, xrows)
     return out
+
+
+def big_rows(A: dict, by: dict, fresh: dict) -> list:
+    """🎯 다음 거래일 +50% 모델 상위 (3년 학습) — 오늘 이미 +50% 넘게 간 건 제외, 거래량 붙으며 출발하면 가산"""
+    rows = []
+    for t, r in A.items():
+        if r["p"] < 85:
+            continue
+        sn = (by.get(t) or {}).get("snap") or {}
+        chg, rv = sn.get("chg"), sn.get("relvol") or 0
+        if chg is not None and (chg >= 50 or chg <= -15):
+            continue
+        trig = chg is not None and 3 <= chg < 50 and rv >= 1.5
+        nw = fresh.get(t) or []
+        dil = any(x["side"] == "dil" for x in nw)
+        s = r["p"] + (8 if trig else 0) - (10 if dil else 0)
+        rows.append((s, t, dict(r, chg=round(chg, 1) if chg is not None else None, rv=round(rv, 1) if rv else None, trig=trig,
+                                dil=[f"{x['form']} ({x['date'][5:]})" for x in nw if x["side"] == "dil"][:2])))
+    return rows
 
 
 def acc_rows(A: dict, by: dict, fresh: dict) -> list:
@@ -183,7 +205,7 @@ def _finish(out, hz, eng, by, S, sc, xrows=None):
     # 하락 신호 1개 붙은 종목만 아래로 (꼬리표는 상관없음) → 많이 포착된 순 → 평균 순위
     lst.sort(key=lambda x: (len(x["fall"]), -x["n"], x["avg"]))
     out["hz"][hz] = {"list": lst[:60], "dropped": dropped[:20], "counts": {k: min(len(v), TOP) for k, v in eng.items()},
-                     "only": (["preview", "ext", "acc"] if hz == "0" else None)}
+                     "only": (["preview", "ext", "big", "acc"] if hz == "0" else None)}
 
 
 def falling(it: dict, r: dict, xe: dict, px: float) -> list[str]:

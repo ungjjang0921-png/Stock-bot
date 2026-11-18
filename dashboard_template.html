@@ -564,12 +564,13 @@ function deepBlock(it){
     <div class="ds"><div class="dt">보유자·내부자 <small>13D/G·Form 4·144 — 누가 사고 누가 파나</small></div>${hs || '<div style="font-size:11.5px;color:var(--muted)">최근 1년 보유자 공시 없음</div>'}</div>
   </div>`;
 }
-const EN = [["preview","👁","프리뷰","장중 급등 흐름 — 오늘 오르는 종목 중 +20% 터치 비율·상승·거래량"],["ext","🌙","시간외","프장·애프터(데이장 대비) 급등 — 시간외 상승률 × 거래량 + 모델 점수"],["acc","🧲","바닥매집","바닥권에서 조용히 매집된 뒤 다음 거래일 +20% 터질 확률 — 5년 학습 · 최근 60거래일 검증"],["signal","📈","시그널","학습 모델 — 급등 판별 점수(백분위)·검증 확률"],["best","🏅","베스트","유사 사례 150건 — +30% 사례율·목표 선도달률"],["burn","🔥","버닝업","강하게 치솟는 종목 — 5일 확률 70 + 당일 상승 20 + 유통 10"]];
+const EN = [["preview","👁","프리뷰","장중 급등 흐름 — 오늘 오르는 종목 중 +20% 터치 비율·상승·거래량"],["ext","🌙","시간외","프장·애프터(데이장 대비) 급등 — 시간외 상승률 × 거래량 + 모델 점수"],["big","🎯","대박50","다음 거래일 고가 +50% 터질 확률 — 3년치 일봉 학습 · 최근 60거래일 검증"],["acc","🧲","바닥매집","바닥권에서 조용히 매집된 뒤 다음 거래일 +20% 터질 확률 — 5년 학습 · 최근 60거래일 검증"],["signal","📈","시그널","학습 모델 — 급등 판별 점수(백분위)·검증 확률"],["best","🏅","베스트","유사 사례 150건 — +30% 사례율·목표 선도달률"],["burn","🔥","버닝업","강하게 치솟는 종목 — 5일 확률 70 + 당일 상승 20 + 유통 10"]];
 function catchDetail(c, hz){
   const e = c.eng, out = [];
   const pc = v => v == null ? "-" : `${v >= 0 ? "+" : ""}${(+v).toFixed(1)}%`;
   if (e.preview) out.push(["preview", `오늘 <b class="up">+${e.preview.chg}%</b> · 비슷한 장중 상황 +20% 터치 비율 <b>${e.preview.reg ?? "-"}%</b>${e.preview.pre != null ? ` · 프리장 +10% ${e.preview.pre}%` : ""} · VWAP ${e.preview.vwap ? "위 ✅" : "아래"} · 거래량 ${e.preview.rv ?? "-"}배`]);
   if (e.ext) out.push(["ext", `${e.ext.mode === "pre" ? "프리장" : "애프터"} <b class="up">+${e.ext.chg}%</b> · 시간외 거래량 ${(e.ext.vol / 1e3).toFixed(0)}K주 · 시간외 가격 ${usd(e.ext.px)} · 모델 백분위 ${e.ext.p}${e.ext.mode === "night" ? "<br><small style=\"color:var(--muted)\">애프터에서 오른 종목은 한국 낮 데이장(주간거래)·다음 프장에서 이어질 수 있어요. 데이장 실시간 가격은 무료 데이터가 없어 애프터 마감가 기준이에요.</small>" : ""}`]);
+  if (e.big) out.push(["big", `+50% 모델 백분위 <b>${e.big.p}</b>/100${e.big.prob != null ? ` · 이 점수대 검증 +50% 적중 <b>${e.big.prob}%</b>` : ""}${e.big.trig ? ` · <b class="up">오늘 거래량 붙으며 출발 ${pc(e.big.chg)} (×${e.big.rv})</b>` : ""}<br>6개월 저점 대비 ${pc(e.big.low)} · 1년 고점 대비 ${pc(e.big.dd)}${(e.big.why || []).length ? `<br><small style="color:var(--muted)">근거: ${e.big.why.map(esc).join(" · ")}</small>` : ""}${(e.big.dil || []).length ? `<br>⚠ <b style="color:#ff8f8f">최근 2일 증자 서류</b> ${e.big.dil.map(esc).join(" · ")} (감점)` : ""}`]);
   if (e.acc) out.push(["acc", `바닥매집 백분위 <b>${e.acc.p}</b>/100${e.acc.prob != null ? ` · 이 점수대 검증 적중 <b>${e.acc.prob}%</b>` : ""}${e.acc.trig ? ` · <b class="up">오늘 거래량 붙으며 출발 ${pc(e.acc.chg)} (×${e.acc.rv})</b>` : ""}<br>6개월 저점 대비 ${pc(e.acc.low)} · 1년 고점 대비 ${pc(e.acc.dd)} · 최근 20일 매집일 <b>${e.acc.absorb}일</b> · 최근 5일 거래량 평소의 ${e.acc.dry}배 · 10일 변동폭 ${Math.round(e.acc.sq * 100)}% (60일 대비)${(e.acc.news || []).length ? `<br>📰 <b>최근 2일 새 공시</b> ${e.acc.news.map(esc).join(" · ")} <small style="color:var(--muted)">(재료 가능성 — 가산)</small>` : ""}${(e.acc.dil || []).length ? `<br>⚠ <b style="color:#ff8f8f">최근 2일 증자 서류</b> ${e.acc.dil.map(esc).join(" · ")} (감점)` : ""}${(e.acc.why || []).length ? `<br><small style="color:var(--muted)">근거: ${e.acc.why.map(esc).join(" · ")}</small>` : ""}`]);
   if (e.signal) out.push(["signal", `판별 백분위 <b>${e.signal.p}</b>/100 · 패턴 <b>${esc(e.signal.pat || "-")}</b><br>검증 확률 1일 ${e.signal.probs["1"] ?? "-"}% · 5일 ${e.signal.probs["5"] ?? "-"}% · 10일 ${e.signal.probs["10"] ?? "-"}% <small>(표본 부족하면 -)</small>`]);
   if (e.best) out.push(["best", `+30% 사례율 <b>${e.best.r30}%</b> · 목표 선도달률(−10% 손절보다 +30% 먼저) <b>${e.best.ft}%</b><br>전체 사례 최고 상승 P20~P80 ${pc(e.best.q[0])} ~ ${pc(e.best.q[2])}${e.best.cq ? ` · 급등한 경우 중앙 ${pc(e.best.cq[1])}` : ""} · 유사도 ${e.best.sim}`]);
@@ -591,12 +592,15 @@ function catchCards(L, Z){
       || '<div class="empty">이 기간에 포착된 종목이 없어요</div>';
 }
 function tmList(){
-  const T = DATA.tm || {}, q = (window.TQ || "").trim().toUpperCase();
+  const T = DATA.tm || {}, q = (window.TQ || "").trim().toUpperCase(), only = window.T50 !== false;
   let L = (T.rows || []).filter(r => !q || r.t.includes(q) || (r.name || "").toUpperCase().includes(q));
-  const k = {now: r => -r.ret_now, low: r => -r.ret_low, soon: r => r.soon, rv: r => -r.rv}[window.TS || "now"];
+  const nAll = L.length;
+  if (only) L = L.filter(r => r.p50 >= 25 || (r.ret_now + 0.5) >= 50);
+  const k = {p50: r => -(r.p50 * 1000 + r.ret_now), now: r => -r.ret_now, low: r => -r.ret_low, soon: r => r.soon, rv: r => -r.rv}[window.TS || "now"];
   L = L.slice().sort((a, b) => k(a) - k(b));
   const sg = v => `${v >= 0 ? "+" : ""}${v}%`;
   $("#tml").innerHTML = L.map((r, i) => `<div class="tmr" onclick="if(!event.target.closest('.lc,.ltg,.lan,.lpl')){this.classList.toggle('open');if(this.classList.contains('open'))loadCharts(this)}">
+    <div style="font-size:12px;margin-bottom:4px">🎯 지금부터 <b class="up">+50% 이상</b> 갈 확률 <b class="up" style="font-size:15px">${r.p50}%</b> <span style="color:var(--muted)">· +30% 이상 ${r.p30}% (비슷한 과거 ${r.n}일 중)</span></div>
     <div class="hd"><div><span class="tk">${i + 1}. ${esc(r.t)}</span> <span class="nm">${esc((r.name || "").slice(0, 26))}</span></div>
       <div style="font-family:var(--mono);font-size:12.5px">${usd(r.px)} <span class="${r.chg >= 0 ? "up" : "dn"}">${sg(r.chg)}</span></div></div>
     <div class="g2">
@@ -608,7 +612,9 @@ function tmList(){
       <span class="rt">예상 순수익률<br>저점 매수 <b class="${r.ret_low >= 0 ? "up" : "dn"}">${sg(r.ret_low)}</b> · 현재가 매수 <b class="${r.ret_now >= 0 ? "up" : "dn"}">${sg(r.ret_now)}</b></span></div>
     <div style="font-size:11px;color:var(--muted);margin-top:6px">비슷한 장중 흐름 ${r.n}일 (같은 종목 ${r.same}일) · 같은 시간대 조합 ${r.combo}/${r.n}일 · 오늘 거래량 평소의 ${r.rv}배 · 분석 ${esc(T.at)} KST</div>
     <div class="an"><b>비슷했던 과거 날</b> (그날 저점·고점 시각, 한국시간)<br>${r.an.map(a => `${esc(a.t)} ${esc(a.d)} · 저점 ${esc(a.lt)} ${sg(a.lr)} → 고점 ${esc(a.ht)} ${sg(a.hr)}`).join("<br>")}${chartBox(r.t)}</div>
-  </div>`).join("") || '<div class="empty">검색 결과가 없어요</div>';
+  </div>`).join("") || `<div class="empty">${only && nAll ? `+50% 터질 확률 25% 이상인 종목이 지금은 없어요 (전체 ${nAll}개). <a href="#" onclick="T50=false;tmList();return false">전체 보기</a>` : "검색 결과가 없어요"}</div>`;
+  if (only && L.length && L.length < nAll) $("#tml").insertAdjacentHTML("beforeend", `<div style="text-align:center;margin:6px 0"><a href="#" onclick="T50=false;tmList();return false">나머지 ${nAll - L.length}개도 보기</a></div>`);
+  if (!only) $("#tml").insertAdjacentHTML("afterbegin", `<div style="margin-bottom:6px"><a href="#" onclick="T50=true;tmList();return false">🎯 +50% 후보만 보기</a></div>`);
 }
 function catchFilter(){
   const q = (window.CQ || "").trim().toUpperCase();
@@ -1106,19 +1112,19 @@ function render(){
   }
   if (TAB === "tm"){
     const T = DATA.tm || {}, V = T.val;
-    window.TS = window.TS || "now";
+    window.TS = window.TS || "p50";
     $("#sub").textContent = `${DATA.updated} 업데이트 · 타임머신 분석 ${T.at || "-"} KST 기준`;
     let h = `<div class="intro">⏱ <b>타임머신 · 급등 탐색</b> — 오늘 전일 종가 대비 <b>+15% 이상 달린 종목</b>만 봐요. 과거 사례는 최근 60일 안에 장중 +30% 이상 터진 적 있는 종목 ${(T.val || {}).lib || ""}개의 5분봉 라이브러리에서, 지금 시각까지 <b>비슷하게 이미 달리고 있던 날</b>만 골라요.<br>오늘 지금 시각까지의 장중 흐름(최근 3시간 모양·전일 대비 위치·고점 대비·거래량)과 <b>가장 비슷했던 과거 장중 ${T.k || 12}일</b>(같은 종목 우선, 최근 60일 5분봉)을 찾아서, 그날들의 <b>다음 저점 시각·가격</b>과 <b>그 뒤 고점</b>을 모았어요.<br><span style="color:var(--muted)">대표값은 중앙값, '50%'는 과거 사례의 가운데 절반이 들어간 범위예요. 시각은 한국시간. 예상 순수익률은 왕복 수수료 ${T.fee || 0.5}% 뺀 값이에요. 과거 사례의 '그날 최고가'라서 실제보다 좋게 보이기 쉬워요 — 아래 검증 숫자를 같이 보세요.</span></div>`;
     if (V) h += `<div class="cst">📊 <b>과거 검증</b> — 최근 ${V.days}거래일, 그 시각까지 +15% 이상 달린 경우만 '그 전 데이터만'으로 예측해 본 ${V.n.toLocaleString()}건<br>
       저점 지정가 체결 <b>${V.fill}%</b> · 체결 뒤 예측 고점 도달 <b>${V.win}%</b> · 1회 평균 순수익 <b class="${V.avg >= 0 ? "up" : "dn"}">${V.avg >= 0 ? "+" : ""}${V.avg}%</b> (중앙 ${V.med}%)<br>
-      현재가 매수 → 예측 고점 or 그날 마감 정리: 평균 <b class="${V.avg_now >= 0 ? "up" : "dn"}">${V.avg_now >= 0 ? "+" : ""}${V.avg_now}%</b> · 수익 난 비율 ${V.pos_now}% · 실제 저점이 예측 시간 50% 구간 안 ${V.time_in}%</div>`;
+      ${V.p50 ? `🎯 +50% 확률 검증: 예측 25% 이상이던 경우 실제 +50% 터짐 <b>${(V.p50["25"] || {}).hit ?? "-"}%</b> (${(V.p50["25"] || {}).n ?? 0}건)${V.p50["40"] ? ` · 40% 이상이던 경우 <b>${V.p50["40"].hit}%</b> (${V.p50["40"].n}건)` : ""} vs 전체 ${V.p50.base}%<br>` : ""}현재가 매수 → 예측 고점 or 그날 마감 정리: 평균 <b class="${V.avg_now >= 0 ? "up" : "dn"}">${V.avg_now >= 0 ? "+" : ""}${V.avg_now}%</b> · 수익 난 비율 ${V.pos_now}% · 실제 저점이 예측 시간 50% 구간 안 ${V.time_in}%</div>`;
     if (T.closed || !(T.rows || []).length){
       h += `<div class="empty">${T.closed ? "지금은 미국 장(프리·정규·애프터)이 닫혀 있어요. 한국시간 오후 6시 프리장부터 예측이 채워져요." : "지금은 오늘 +15% 이상 달린 종목이 없어요. 급등주가 나오면 다음 갱신 때 채워져요."}</div>`;
       $("#list").innerHTML = h; return;
     }
     h += `<div style="display:flex;gap:6px;margin-bottom:8px"><input placeholder="🔍 티커·종목명 검색" value="${esc(window.TQ || "")}" oninput="TQ=this.value;tmList()" style="flex:1;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px">
       <select onchange="TS=this.value;tmList()" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px">
-      <option value="now" ${TS === "now" ? "selected" : ""}>예상 순수익 · 현재가 매수</option><option value="low" ${TS === "low" ? "selected" : ""}>예상 순수익 · 저점 매수</option>
+      <option value="p50" ${TS === "p50" ? "selected" : ""}>+50% 터질 확률</option><option value="now" ${TS === "now" ? "selected" : ""}>예상 순수익 · 현재가 매수</option><option value="low" ${TS === "low" ? "selected" : ""}>예상 순수익 · 저점 매수</option>
       <option value="soon" ${TS === "soon" ? "selected" : ""}>다음 저점 빠른 순</option><option value="rv" ${TS === "rv" ? "selected" : ""}>오늘 상대 거래량</option></select></div><div id="tml"></div>`;
     $("#list").innerHTML = h;
     tmList();
@@ -1139,6 +1145,11 @@ function render(){
         전체 ${r(S.all)} · 엔진 1개 ${r(S.by_n["1"])} · 2개 ${r(S.by_n["2"])} · <b>3개 이상 ${r(S.by_n["3"])}</b> · 🎯 ${r(S.focus)}<br>
         <span style="color:var(--muted)">엔진별(10위 안): ${EN.map(([k, , n]) => `${n} ${S.eng[k] && S.eng[k].n ? S.eng[k].r + "%" : "-"}`).join(" · ")}</span></div>`;
     } else if (CH === "0" || CH === "1") h += `<div class="cst" style="color:var(--muted)">📊 ${CH === "0" ? (C.mode === "pre" ? "프장 목록은 미국 08:30~09:30 사이" : C.mode === "night" ? "데이장 대비 목록은 애프터 이후(미국 20시~새벽 4시)" : "오늘 탭은 정규장 시작 15분 뒤") : "1거래일 탭은 장 마감 뒤"} 목록을 고정해서 실제 결과로 엔진별 적중률을 매겨요. 며칠 쌓이면 여기에 성적이 나와요.</div>`;
+    const BE = (DATA.pred || {}).big_eval;
+    if (BE && (CH === "0" || CH === "1")){
+      const m = BE.models[BE.model] || {};
+      h += `<div class="cst">🎯 <b>대박50 엔진 검증</b> — 최근 3년 일봉(${BE.train_n.toLocaleString()}일 · 다음날 +50% ${BE.train_pos.toLocaleString()}번)으로 학습. 최근 60거래일(${esc(BE.eval_from)}~) 매일 점수 상위 ${BE.top}개 → 다음날 고가 +50% 적중 <b>${m.rate}%</b> <small>(${m.k}/${m.n} · 95% 범위 ${m.lo}~${m.hi}%)</small> vs 아무거나 <b>${BE.base}%</b></div>`;
+    }
     const AE = (DATA.pred || {}).acc_eval;
     if (AE && (CH === "0" || CH === "1")){
       const m = AE.models[AE.model] || {};
