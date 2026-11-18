@@ -2516,6 +2516,7 @@ def build_squeeze(items: list) -> list[dict]:
 SQUEEZE: list = []
 MINS: dict = {}
 CATCH: dict = {}
+TM: dict = {}
 
 
 # ───────────────── 8. 출력 ─────────────────
@@ -2571,7 +2572,7 @@ def write_page(items: list[dict], surge=None, jbc=None) -> None:
     tpl = (ROOT / "dashboard_template.html").read_text(encoding="utf-8")
     payload = _clean({"updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"), "items": items,
                       "forward": FORWARD_DAYS, "surge": surge or [], "jbc": jbc or [],
-                      "cal": CALENDAR, "sq": SQUEEZE, "pred": PRED, "catch": CATCH,
+                      "cal": CALENDAR, "sq": SQUEEZE, "pred": PRED, "catch": CATCH, "tm": TM,
                       "rules": {"reg": int(SURGE_REG * 100), "pre": int(SURGE_PRE * 100), "jb": int(JB_HIT * 100)}})
     data = json.dumps(payload, ensure_ascii=False, default=lambda o: None).replace("</", "<\\/")
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -2707,6 +2708,19 @@ def main():
         CATCH["sess"] = {"pre": "프리장", "reg": "정규장", "night": "애프터·데이장"}[ext_mode(now_et)[0]]
     except Exception as e:
         log.exception("포착 엔진 실패: %s", e)
+    try:                                            # ⏱ 타임머신: 비슷한 과거 장중 흐름으로 다음 저점·고점 예측
+        import timemachine as tmmod
+        pick = []
+        for hz in ("0", "1"):
+            pick += [c["t"] for c in ((CATCH.get("hz") or {}).get(hz) or {}).get("list", [])[:20]]
+        pick += [it["t"] for it in sorted(items, key=lambda x: -(x.get("chg") or 0))[:25]]
+        pick = list(dict.fromkeys(pick))[:45]
+        frames = _download(pick, period="60d", interval="5m", prepost=True)
+        names = {it["t"]: it["name"] for it in items}
+        names.update({c["t"]: c.get("name", "") for z in (CATCH.get("hz") or {}).values() for c in z.get("list", [])})
+        TM.update(tmmod.build(frames, datetime.now(ET), names))
+    except Exception as e:
+        log.exception("타임머신 실패: %s", e)
     try:
         run_deep(items, PRED, datetime.now(KST).date())
     except Exception as e:

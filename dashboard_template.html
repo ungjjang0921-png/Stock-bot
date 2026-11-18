@@ -83,6 +83,19 @@ select{flex:0 0 auto;max-width:46%}
 .cd{margin:8px 0 0 30px;display:none}.cc.open .cd{display:block}
 .cd .eb{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:6px;font-size:12px;line-height:1.6}
 .cd .eb h5{margin:0 0 4px;font-size:12.5px;display:flex;justify-content:space-between}
+.tmr{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+.tmr .hd{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.tmr .tk{font-weight:800;font-size:15px}.tmr .nm{font-size:11px;color:var(--muted)}
+.tmr .g2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.tmr .bx{background:#0f1722;border-radius:9px;padding:7px 9px;font-size:11.5px;line-height:1.55}
+.tmr .bx .t{color:#5eead4;font-weight:800;font-size:13px;font-family:var(--mono)}
+.tmr .bx .p{font-weight:800;font-size:13px;font-family:var(--mono)}
+.tmr .bx small{color:var(--muted)}
+.tmr .ft{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;font-size:11.5px}
+.tmr .tag{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:6px;background:rgba(94,234,212,.12);color:#5eead4}
+.tmr .rt{margin-left:auto;text-align:right;font-family:var(--mono)}
+.tmr .rt b{font-size:14px}
+.tmr .an{display:none;margin-top:8px;font-size:11.5px;line-height:1.6}.tmr.open .an{display:block}
 .cst{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px;font-size:12px;line-height:1.7;margin-bottom:8px}
 .cal{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px}
 .cal .ch{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
@@ -228,7 +241,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .prob .pb i{display:block;height:100%;border-radius:3px;background:var(--good)}
 .prob em{font-style:normal;font-size:10.5px;color:var(--muted)}
 .prob .act{display:inline-block;margin-top:2px;font-size:11px;font-weight:700}
-.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:10px}
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:10px}
 .tab{flex:1;text-align:center;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:10px;padding:9px 2px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
 .tab.on{border-color:var(--accent);color:var(--text);background:#0f2433}
 .hide{display:none!important}
@@ -324,7 +337,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 <header>
   <h1 style="display:flex;justify-content:space-between;align-items:center">🎯 펌핑 목적 워치리스트<span id="cur" onclick="toggleCur()" style="font-size:12px;font-weight:700;border:1px solid var(--line);border-radius:14px;padding:4px 10px;cursor:pointer;background:var(--panel)"></span></h1>
   <div class="sub" id="sub"></div>
-  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="catch">📡 포착</span><span class="tab" data-v="pred">🔮 예측</span></div>
+  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="catch">📡 포착</span><span class="tab" data-v="pred">🔮 예측</span><span class="tab" data-v="tm">⏱ 타임머신</span></div>
   <div class="controls" id="ctl">
     <input id="q" placeholder="티커·회사명 검색" autocomplete="off">
     <select id="sort">
@@ -576,6 +589,26 @@ function catchCards(L, Z){
       <div class="cd">${chartBox(c.t)}${catchDetail(c, CH)}${tradeBlock(DATA.items.find(x => x.t === c.t)).replace('class="tp"', 'class="tp" style="margin:0 0 6px"')}
         ${DATA.items.find(x => x.t === c.t) ? `<a class="go" href="#" onclick="openCard('${esc(c.t)}');return false">워치에서 전체 보기 →</a>` : ""}</div></div>`).join("")
       || '<div class="empty">이 기간에 포착된 종목이 없어요</div>';
+}
+function tmList(){
+  const T = DATA.tm || {}, q = (window.TQ || "").trim().toUpperCase();
+  let L = (T.rows || []).filter(r => !q || r.t.includes(q) || (r.name || "").toUpperCase().includes(q));
+  const k = {now: r => -r.ret_now, low: r => -r.ret_low, soon: r => r.soon, rv: r => -r.rv}[window.TS || "now"];
+  L = L.slice().sort((a, b) => k(a) - k(b));
+  const sg = v => `${v >= 0 ? "+" : ""}${v}%`;
+  $("#tml").innerHTML = L.map((r, i) => `<div class="tmr" onclick="if(!event.target.closest('.lc,.ltg,.lan,.lpl')){this.classList.toggle('open');if(this.classList.contains('open'))loadCharts(this)}">
+    <div class="hd"><div><span class="tk">${i + 1}. ${esc(r.t)}</span> <span class="nm">${esc((r.name || "").slice(0, 26))}</span></div>
+      <div style="font-family:var(--mono);font-size:12.5px">${usd(r.px)} <span class="${r.chg >= 0 ? "up" : "dn"}">${sg(r.chg)}</span></div></div>
+    <div class="g2">
+      <div class="bx">예상 저점<br><span class="t">${esc(r.low.at)}</span> KST<br><span class="p">${usd(r.low.px)}</span><br><small>시간 50% ${esc(r.low.ar[0])}~${esc(r.low.ar[1])}<br>가격 50% ${usd(r.low.r[0])}~${usd(r.low.r[1])}</small></div>
+      <div class="bx">저점 이후 고점<br><span class="t">${esc(r.high.at)}</span> KST<br><span class="p up">${usd(r.high.px)}</span><br><small>시간 50% ${esc(r.high.ar[0])}~${esc(r.high.ar[1])}<br>가격 50% ${usd(r.high.r[0])}~${usd(r.high.r[1])}</small></div>
+    </div>
+    <div class="ft">${r.notes.map(n => `<span class="tag">${esc(n)}</span>`).join("")}
+      <span style="color:var(--muted)">현재가 대비 저점 ${sg(r.to_low)} · 저점 대비 고점 ${sg(r.lo_hi)}</span>
+      <span class="rt">예상 순수익률<br>저점 매수 <b class="${r.ret_low >= 0 ? "up" : "dn"}">${sg(r.ret_low)}</b> · 현재가 매수 <b class="${r.ret_now >= 0 ? "up" : "dn"}">${sg(r.ret_now)}</b></span></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">비슷한 장중 흐름 ${r.n}일 (같은 종목 ${r.same}일) · 같은 시간대 조합 ${r.combo}/${r.n}일 · 오늘 거래량 평소의 ${r.rv}배 · 분석 ${esc(T.at)} KST</div>
+    <div class="an"><b>비슷했던 과거 날</b> (그날 저점·고점 시각, 한국시간)<br>${r.an.map(a => `${esc(a.t)} ${esc(a.d)} · 저점 ${esc(a.lt)} ${sg(a.lr)} → 고점 ${esc(a.ht)} ${sg(a.hr)}`).join("<br>")}${chartBox(r.t)}</div>
+  </div>`).join("") || '<div class="empty">검색 결과가 없어요</div>';
 }
 function catchFilter(){
   const q = (window.CQ || "").trim().toUpperCase();
@@ -1069,6 +1102,26 @@ function render(){
       h += `<div class="crow" onclick="openCard('${esc(e.t)}')"><b>${TK(e.t)}</b><div><em>${esc(e.ev)}</em><small>${esc(e.name)} · ${esc(e.note)}</small></div></div>`;
     }
     $("#list").innerHTML = xs.length ? h : h + '<div class="empty">14일 안에 확인된 일정이 없어요</div>';
+    return;
+  }
+  if (TAB === "tm"){
+    const T = DATA.tm || {}, V = T.val;
+    window.TS = window.TS || "now";
+    $("#sub").textContent = `${DATA.updated} 업데이트 · 타임머신 분석 ${T.at || "-"} KST 기준`;
+    let h = `<div class="intro">⏱ <b>타임머신</b> — 오늘 지금 시각까지의 장중 흐름(최근 3시간 모양·전일 대비 위치·고점 대비·거래량)과 <b>가장 비슷했던 과거 장중 ${T.k || 12}일</b>(같은 종목 우선, 최근 60일 5분봉)을 찾아서, 그날들의 <b>다음 저점 시각·가격</b>과 <b>그 뒤 고점</b>을 모았어요.<br><span style="color:var(--muted)">대표값은 중앙값, '50%'는 과거 사례의 가운데 절반이 들어간 범위예요. 시각은 한국시간. 예상 순수익률은 왕복 수수료 ${T.fee || 0.5}% 뺀 값이에요. 과거 사례의 '그날 최고가'라서 실제보다 좋게 보이기 쉬워요 — 아래 검증 숫자를 같이 보세요.</span></div>`;
+    if (V) h += `<div class="cst">📊 <b>과거 검증</b> — 최근 ${V.days}거래일, 매일 같은 시각에 '그 전 데이터만'으로 예측해 본 ${V.n.toLocaleString()}건<br>
+      저점 지정가 체결 <b>${V.fill}%</b> · 체결 뒤 예측 고점 도달 <b>${V.win}%</b> · 1회 평균 순수익 <b class="${V.avg >= 0 ? "up" : "dn"}">${V.avg >= 0 ? "+" : ""}${V.avg}%</b> (중앙 ${V.med}%)<br>
+      현재가 매수 → 예측 고점 or 그날 마감 정리: 평균 <b class="${V.avg_now >= 0 ? "up" : "dn"}">${V.avg_now >= 0 ? "+" : ""}${V.avg_now}%</b> · 수익 난 비율 ${V.pos_now}% · 실제 저점이 예측 시간 50% 구간 안 ${V.time_in}%</div>`;
+    if (T.closed || !(T.rows || []).length){
+      h += `<div class="empty">${T.closed ? "지금은 미국 장(프리·정규·애프터)이 닫혀 있어요. 한국시간 오후 6시 프리장부터 예측이 채워져요." : "아직 분석된 종목이 없어요. 다음 갱신 때 채워져요."}</div>`;
+      $("#list").innerHTML = h; return;
+    }
+    h += `<div style="display:flex;gap:6px;margin-bottom:8px"><input placeholder="🔍 티커·종목명 검색" value="${esc(window.TQ || "")}" oninput="TQ=this.value;tmList()" style="flex:1;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px">
+      <select onchange="TS=this.value;tmList()" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px">
+      <option value="now" ${TS === "now" ? "selected" : ""}>예상 순수익 · 현재가 매수</option><option value="low" ${TS === "low" ? "selected" : ""}>예상 순수익 · 저점 매수</option>
+      <option value="soon" ${TS === "soon" ? "selected" : ""}>다음 저점 빠른 순</option><option value="rv" ${TS === "rv" ? "selected" : ""}>오늘 상대 거래량</option></select></div><div id="tml"></div>`;
+    $("#list").innerHTML = h;
+    tmList();
     return;
   }
   if (TAB === "catch"){
