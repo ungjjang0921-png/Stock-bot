@@ -241,7 +241,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 .prob .pb i{display:block;height:100%;border-radius:3px;background:var(--good)}
 .prob em{font-style:normal;font-size:10.5px;color:var(--muted)}
 .prob .act{display:inline-block;margin-top:2px;font-size:11px;font-weight:700}
-.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:10px}
+.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:10px}
 .tab{flex:1;text-align:center;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:10px;padding:9px 2px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
 .tab.on{border-color:var(--accent);color:var(--text);background:#0f2433}
 .hide{display:none!important}
@@ -337,7 +337,7 @@ main{padding:12px 16px 40px;max-width:900px;margin:0 auto}
 <header>
   <h1 style="display:flex;justify-content:space-between;align-items:center">🎯 펌핑 목적 워치리스트<span id="cur" onclick="toggleCur()" style="font-size:12px;font-weight:700;border:1px solid var(--line);border-radius:14px;padding:4px 10px;cursor:pointer;background:var(--panel)"></span></h1>
   <div class="sub" id="sub"></div>
-  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="catch">📡 포착</span><span class="tab" data-v="pred">🔮 예측</span><span class="tab" data-v="tm">⏱ 타임머신</span></div>
+  <div class="tabs" id="tabs"><span class="tab on" data-v="all">📋 워치</span><span class="tab" data-v="catch">📡 포착</span><span class="tab" data-v="pred">🔮 예측</span></div>
   <div class="controls" id="ctl">
     <input id="q" placeholder="티커·회사명 검색" autocomplete="off">
     <select id="sort">
