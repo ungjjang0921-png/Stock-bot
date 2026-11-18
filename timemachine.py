@@ -81,7 +81,18 @@ def _future(day: dict, s: int) -> dict | None:
             "end": float(day["c"][-1] - c0), "lo": l - c0, "hi": h - c0}
 
 
+UP_MIN = np.log(1.15)    # 급등 탐색: 오늘 전일 종가 대비 +15% 이상 찍은 종목만
+
+
+def _surge_pool(q_vec, pool):
+    """지금 시각까지 비슷하게 '이미 달리고 있던' 날만 (미래 정보 안 씀): 고점 높이 · 현재 위치가 비슷한 날"""
+    up_q, c_q = q_vec[0] + q_vec[1], q_vec[0]
+    P = [p for p in pool if p["vec"][0] + p["vec"][1] >= up_q * 0.6 and abs(p["vec"][0] - c_q) <= max(0.08, 0.4 * abs(c_q))]
+    return P if len(P) >= 8 else pool
+
+
 def _neighbors(q_shape, q_vec, pool, t, sd):
+    pool = _surge_pool(q_vec, pool)
     if not pool:
         return []
     S = np.stack([p["shape"] for p in pool]); X = np.stack([p["vec"] for p in pool])
@@ -111,9 +122,10 @@ def _slot_time(day, s: int) -> datetime:
     return datetime(day.year, day.month, day.day, 4, 0, tzinfo=ET) + timedelta(minutes=s * SLOT)
 
 
-def build(frames: dict, now_et: datetime, names: dict | None = None) -> dict:
-    """frames: {티커: 5분봉 DataFrame(60일·프리포스트)}"""
+def build(frames: dict, now_et: datetime, names: dict | None = None, want: set | None = None) -> dict:
+    """frames: {티커: 5분봉 DataFrame(60일·프리포스트)} — 후보(want) + 최근 60일 급등 이력 종목(과거 사례 라이브러리)"""
     names = names or {}
+    want = set(want or frames)
     G = {t: _grid(df) for t, df in frames.items()}
     G = {t: g for t, g in G.items() if len(g) >= 10}
     today = now_et.date()
@@ -147,6 +159,8 @@ def build(frames: dict, now_et: datetime, names: dict | None = None) -> dict:
         if not d or d["n"] < 3:
             continue
         sh, vec = _feat(d, s_now, avgv[t])
+        if t not in want or vec[0] + vec[1] < UP_MIN:      # 오늘 +15% 이상 달린 후보만
+            continue
         nb = _neighbors(sh, vec, P, t, sd)
         for p in nb:
             p["same"] = p["t"] == t
@@ -211,6 +225,8 @@ def validate(G, avgv, s, today) -> dict | None:
     for q in allP:
         if q["d"] not in days or not q["fut"] or q["day"]["n"] < 20:
             continue
+        if q["vec"][0] + q["vec"][1] < UP_MIN:          # 급등 탐색과 같은 조건(그 시각까지 +15% 이상)만 채점
+            continue
         pool = [p for p in allP if p["d"] < q["d"]]
         if len(pool) < 30:
             continue
@@ -236,10 +252,10 @@ def validate(G, avgv, s, today) -> dict | None:
             rets.append((np.exp(hi_t) - 1) * 100 - FEE)
         else:
             rets.append((np.exp(f["end"] - lo_t) - 1) * 100 - FEE)
-    if n < 20:
+    if n < 15:
         return None
     md = lambda a: round(float(np.mean(a)), 2) if a else None
-    return {"n": n, "days": len(days), "fill": round(fill / n * 100, 1), "win": round(win / max(fill, 1) * 100, 1),
+    return {"n": n, "days": len(days), "lib": len(G), "fill": round(fill / n * 100, 1), "win": round(win / max(fill, 1) * 100, 1),
             "avg": md(rets), "med": round(float(np.median(rets)), 2) if rets else None,
             "avg_now": md(rets_now), "pos_now": round(sum(1 for x in rets_now if x > 0) / max(len(rets_now), 1) * 100, 1),
             "time_in": round(in_t / n * 100, 1)}

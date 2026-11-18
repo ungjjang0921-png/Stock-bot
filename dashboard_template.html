@@ -1108,12 +1108,12 @@ function render(){
     const T = DATA.tm || {}, V = T.val;
     window.TS = window.TS || "now";
     $("#sub").textContent = `${DATA.updated} 업데이트 · 타임머신 분석 ${T.at || "-"} KST 기준`;
-    let h = `<div class="intro">⏱ <b>타임머신</b> — 오늘 지금 시각까지의 장중 흐름(최근 3시간 모양·전일 대비 위치·고점 대비·거래량)과 <b>가장 비슷했던 과거 장중 ${T.k || 12}일</b>(같은 종목 우선, 최근 60일 5분봉)을 찾아서, 그날들의 <b>다음 저점 시각·가격</b>과 <b>그 뒤 고점</b>을 모았어요.<br><span style="color:var(--muted)">대표값은 중앙값, '50%'는 과거 사례의 가운데 절반이 들어간 범위예요. 시각은 한국시간. 예상 순수익률은 왕복 수수료 ${T.fee || 0.5}% 뺀 값이에요. 과거 사례의 '그날 최고가'라서 실제보다 좋게 보이기 쉬워요 — 아래 검증 숫자를 같이 보세요.</span></div>`;
-    if (V) h += `<div class="cst">📊 <b>과거 검증</b> — 최근 ${V.days}거래일, 매일 같은 시각에 '그 전 데이터만'으로 예측해 본 ${V.n.toLocaleString()}건<br>
+    let h = `<div class="intro">⏱ <b>타임머신 · 급등 탐색</b> — 오늘 전일 종가 대비 <b>+15% 이상 달린 종목</b>만 봐요. 과거 사례는 최근 60일 안에 장중 +30% 이상 터진 적 있는 종목 ${(T.val || {}).lib || ""}개의 5분봉 라이브러리에서, 지금 시각까지 <b>비슷하게 이미 달리고 있던 날</b>만 골라요.<br>오늘 지금 시각까지의 장중 흐름(최근 3시간 모양·전일 대비 위치·고점 대비·거래량)과 <b>가장 비슷했던 과거 장중 ${T.k || 12}일</b>(같은 종목 우선, 최근 60일 5분봉)을 찾아서, 그날들의 <b>다음 저점 시각·가격</b>과 <b>그 뒤 고점</b>을 모았어요.<br><span style="color:var(--muted)">대표값은 중앙값, '50%'는 과거 사례의 가운데 절반이 들어간 범위예요. 시각은 한국시간. 예상 순수익률은 왕복 수수료 ${T.fee || 0.5}% 뺀 값이에요. 과거 사례의 '그날 최고가'라서 실제보다 좋게 보이기 쉬워요 — 아래 검증 숫자를 같이 보세요.</span></div>`;
+    if (V) h += `<div class="cst">📊 <b>과거 검증</b> — 최근 ${V.days}거래일, 그 시각까지 +15% 이상 달린 경우만 '그 전 데이터만'으로 예측해 본 ${V.n.toLocaleString()}건<br>
       저점 지정가 체결 <b>${V.fill}%</b> · 체결 뒤 예측 고점 도달 <b>${V.win}%</b> · 1회 평균 순수익 <b class="${V.avg >= 0 ? "up" : "dn"}">${V.avg >= 0 ? "+" : ""}${V.avg}%</b> (중앙 ${V.med}%)<br>
       현재가 매수 → 예측 고점 or 그날 마감 정리: 평균 <b class="${V.avg_now >= 0 ? "up" : "dn"}">${V.avg_now >= 0 ? "+" : ""}${V.avg_now}%</b> · 수익 난 비율 ${V.pos_now}% · 실제 저점이 예측 시간 50% 구간 안 ${V.time_in}%</div>`;
     if (T.closed || !(T.rows || []).length){
-      h += `<div class="empty">${T.closed ? "지금은 미국 장(프리·정규·애프터)이 닫혀 있어요. 한국시간 오후 6시 프리장부터 예측이 채워져요." : "아직 분석된 종목이 없어요. 다음 갱신 때 채워져요."}</div>`;
+      h += `<div class="empty">${T.closed ? "지금은 미국 장(프리·정규·애프터)이 닫혀 있어요. 한국시간 오후 6시 프리장부터 예측이 채워져요." : "지금은 오늘 +15% 이상 달린 종목이 없어요. 급등주가 나오면 다음 갱신 때 채워져요."}</div>`;
       $("#list").innerHTML = h; return;
     }
     h += `<div style="display:flex;gap:6px;margin-bottom:8px"><input placeholder="🔍 티커·종목명 검색" value="${esc(window.TQ || "")}" oninput="TQ=this.value;tmList()" style="flex:1;min-width:0;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px">

@@ -2680,6 +2680,7 @@ def main():
         SQUEEZE = build_squeeze(items)
     except Exception as e:
         log.exception("숏스퀴즈 실패: %s", e)
+    EXT = {"rows": []}
     try:                                            # 📡 포착: 5개 엔진 합의
         import catch as catchmod
         now_et = datetime.now(ET)
@@ -2714,11 +2715,20 @@ def main():
         for hz in ("0", "1"):
             pick += [c["t"] for c in ((CATCH.get("hz") or {}).get(hz) or {}).get("list", [])[:20]]
         pick += [it["t"] for it in sorted(items, key=lambda x: -(x.get("chg") or 0))[:25]]
-        pick = list(dict.fromkeys(pick))[:45]
-        frames = _download(pick, period="60d", interval="5m", prepost=True)
+        pick = list(dict.fromkeys(pick + [r["t"] for r in (EXT or {}).get("rows", [])[:15]]))[:50]
+        lib = []                                     # 과거 사례 라이브러리: 최근 60거래일 중 장중 +30% 이상 터진 날이 있는 종목
+        for t, d in PRICES.items():
+            try:
+                g = (d["High"] / d["Close"].shift() - 1).iloc[-60:]
+                if g.max() >= 0.30:
+                    lib.append((int((g >= 0.30).sum()), float(g.max()), t))
+            except Exception:
+                continue
+        lib = [t for *_, t in sorted(lib, reverse=True)[:150] if t not in pick]
+        frames = _download(pick + lib, period="60d", interval="5m", prepost=True)
         names = {it["t"]: it["name"] for it in items}
         names.update({c["t"]: c.get("name", "") for z in (CATCH.get("hz") or {}).values() for c in z.get("list", [])})
-        TM.update(tmmod.build(frames, datetime.now(ET), names))
+        TM.update(tmmod.build(frames, datetime.now(ET), names, want=set(pick)))
     except Exception as e:
         log.exception("타임머신 실패: %s", e)
     try:
