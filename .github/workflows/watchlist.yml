@@ -17,7 +17,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,7 +30,7 @@ jobs:
           restore-keys: wl-
       - run: pip install yfinance pandas numpy requests scikit-learn
       - run: python watchlist.py
-        timeout-minutes: 25
+        timeout-minutes: 48
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           SEC_EMAIL: ${{ secrets.SEC_EMAIL }}
