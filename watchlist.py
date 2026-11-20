@@ -1833,12 +1833,6 @@ def analyze() -> list[dict]:
     tickers = [u["t"] for u in uni]
     prices = daily_cached(tickers)
     PRICES.update(prices)
-    try:                                            # 🧲 잠든 초소형주도 일봉만 받아서 바닥매집 엔진에 넣음
-        DORMANT.update(dormant(set(tickers)))
-        PRICES.update(daily_cached(list(DORMANT)))
-        log.info("잠든 초소형주 %d개 추가", len(DORMANT))
-    except Exception as e:
-        log.warning("잠든 초소형주 조회 실패: %s", e)
     save_caches()                                   # 중간에 끊겨도 받은 데이터는 남김
     mins = intraday(tickers)
     MINS.update(mins)
@@ -2701,14 +2695,8 @@ def main():
         except Exception as e:
             log.warning("시간외 급등 조회 실패: %s", e)
             EXT = {"mode": ext_mode()[0], "rows": []}
-        acc = ((PRED or {}).get("scores") or {}).get("acc") or {}
-        hot = [t for t, r in acc.items() if r.get("p", 0) >= 80]
-        try:
-            FRESH = fresh_filings(hot, cache_get("cik", cik_map), datetime.now(ET).date())
-        except Exception as e:
-            log.warning("최근 공시 확인 실패: %s", e)
-            FRESH = {}
-        CATCH = catchmod.build(items, PRED, SQUEEZE, now_et, live, EXT, fresh=FRESH)
+        CATCH = catchmod.build(items, PRED, SQUEEZE, now_et, live, EXT)
+        CATCH["est"] = catchmod.rerank(CATCH, OUT.parent / "catch_log.json")   # 실제 적중 기록으로 재정렬
         for z in CATCH.get("hz", {}).values():         # 잠든 초소형주는 이름·잠든 표시 채우기
             for c in z.get("list", []):
                 d = DORMANT.get(c["t"])

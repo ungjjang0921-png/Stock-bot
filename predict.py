@@ -343,14 +343,7 @@ def run(prices: dict[str, pd.DataFrame], info: dict[str, dict], cutoff: date, lo
             "pk_med": round(pk_med * 100, 1), "dd_med": round(dd_med, 1), "big": big_ratio, "rsi_stat": rsi_stat,
             "imp": [{"f": FEAT_KO[f], "w": round(float(v), 2)} for f, v in imp],
             "train_n": int(len(tr)), "train_pos": int(ytr.sum()), "eval_from": ev_start.isoformat()}
-    try:
-        acc_engine(A, latest, out)
-    except Exception as e:
-        log.warning("바닥매집 엔진 실패: %s", e)
-    try:
-        big_engine(A, latest, out)
-    except Exception as e:
-        log.warning("대박 엔진 실패: %s", e)
+    # 🧲 바닥매집 · 🎯 대박50 엔진은 뺌 — 실제 기록 적중률이 다른 엔진보다 낮음 (11/06~11/19)
     out["ledger"] = ledger(out, prices, log_path)
     try:
         out["fail"] = failure_analysis(log_path, A)

@@ -21,7 +21,7 @@ log = logging.getLogger("catch")
 
 TOP = 20                       # 엔진별 상위 몇 개를 '포착'으로 볼지
 HIT = {"0": 15, "1": 20}       # 적중 기준: 오늘(진입가 대비 당일 고가 +15%), 1거래일(종가 대비 다음날 고가 +20%)
-ENG = ["preview", "ext", "big", "acc", "signal", "best", "burn", "squeeze"]
+ENG = ["preview", "ext", "signal", "best", "burn"]
 ENG_KO = {"preview": "프리뷰", "ext": "시간외", "big": "대박50", "acc": "바닥매집", "signal": "시그널", "best": "베스트", "burn": "버닝업", "squeeze": "스퀴즈"}
 
 
@@ -80,12 +80,7 @@ def build(items: list, pred: dict, squeeze: list, now_et: datetime, live: bool, 
         if xrows and hz in ("0", "1"):     # 프장·애프터(데이장 대비) 급등
             eng["ext"] = xrows
         if hz in ("0", "1"):               # 🧲 바닥매집 — 아직 안 터진 바닥권 종목 중 매집 흔적 + 검증 모델 상위
-            acc = acc_rows(sc.get("acc") or {}, by, fresh or {})
-            if acc:
-                eng["acc"] = acc
-            big = big_rows(sc.get("big") or {}, by, fresh or {})
-            if big:
-                eng["big"] = big
+            pass
         if hz == "0":                      # 오늘 탭은 장중·시간외 엔진만 — RabbitStock과 같은 방식
             if out["mode"] == "night":     # 밤(애프터·데이장)엔 낮 장중 흐름이 끝났으니 시간외 엔진만
                 eng.pop("preview", None)
@@ -205,7 +200,7 @@ def _finish(out, hz, eng, by, S, sc, xrows=None):
     # 하락 신호 1개 붙은 종목만 아래로 (꼬리표는 상관없음) → 많이 포착된 순 → 평균 순위
     lst.sort(key=lambda x: (len(x["fall"]), -x["n"], x["avg"]))
     out["hz"][hz] = {"list": lst[:60], "dropped": dropped[:20], "counts": {k: min(len(v), TOP) for k, v in eng.items()},
-                     "only": (["preview", "ext", "big", "acc"] if hz == "0" else None)}
+                     "only": (["preview", "ext"] if hz == "0" else None)}
 
 
 def falling(it: dict, r: dict, xe: dict, px: float) -> list[str]:
@@ -297,3 +292,47 @@ def ledger(cat: dict, prices: dict, path: Path, now_et: datetime, session_day: d
                   "focus": rate([e for e in xs if e["n"] >= 3 and not e["warn"]]),
                   "th": HIT.get(hz, HIT["0"])}
     return st
+
+
+# ── 🎯 실제 적중 기록으로 순위 다시 매기기 ──
+def _bucket(r: int) -> str:
+    return "1-3" if r <= 3 else "4-5" if r <= 5 else "6-10" if r <= 10 else "11+"
+
+
+def rerank(cat: dict, path: Path) -> dict:
+    """지난 포착 기록에서 '엔진 × 순위 구간'별 실제 적중률을 구해서
+    종목마다 가장 믿을 만한 근거(적중률이 높은 엔진·순위)를 붙이고 그 순서로 정렬.
+    표본이 적은 칸은 전체 평균 쪽으로 당겨서(수축) 우연히 높게 나온 칸을 믿지 않음."""
+    try:
+        book = [e for e in json.loads(path.read_text(encoding="utf-8")) if e.get("res") is not None]
+    except Exception:
+        return {}
+    table = {}
+    for hz, pool in (("0", ("0", "p", "n")), ("1", ("1",))):
+        B = [e for e in book if e["hz"] in pool]
+        if len(B) < 30:
+            continue
+        base = sum(e["res"] for e in B) / len(B)
+        cnt = {}
+        for e in B:
+            for k, r in e["eng"].items():
+                c = cnt.setdefault((k, _bucket(r)), [0, 0])
+                c[0] += e["res"]; c[1] += 1
+        PRIOR = 8
+        rate = {k: ((a + PRIOR * base) / (n + PRIOR), n) for k, (a, n) in cnt.items()}
+        table[hz] = {"base": round(base * 100, 1), "n": len(B),
+                     "cells": {f"{k}|{b}": [round(v * 100, 1), n] for (k, b), (v, n) in rate.items()}}
+        z = (cat.get("hz") or {}).get(hz)
+        if not z:
+            continue
+        for c in z["list"]:
+            best = max(((rate.get((k, _bucket(v["rank"])), (base, 0)), k, v["rank"]) for k, v in c["eng"].items()),
+                       key=lambda x: x[0][0], default=None)
+            if best:
+                (v_, n_), k_, r_ = best
+                c["est"] = round(v_ * 100, 1)
+                c["est_k"] = k_
+                c["est_r"] = _bucket(r_)
+                c["est_n"] = n_
+        z["list"].sort(key=lambda c: (len(c["fall"]), -(c.get("est") or 0), -c["n"], c["avg"]))
+    return table
