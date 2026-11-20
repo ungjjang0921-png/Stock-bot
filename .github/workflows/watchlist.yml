@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  actions: write          # 끝나면 30분 뒤 다음 실행을 스스로 예약
 
 concurrency:
   group: watchlist
@@ -17,8 +18,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 75
     steps:
+      - run: echo "START=$(date +%s)" >> $GITHUB_ENV
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -49,3 +51,16 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           git add docs 2>/dev/null || true
           git diff --cached --quiet || (git commit -m "update dashboard" && git pull --rebase -X theirs && git push)
+      # GitHub 예약 실행은 자주 건너뛰어서 → 미국 장 시간(프리·정규·애프터)엔 끝나고 30분 맞춰 스스로 다음 실행을 예약
+      - name: next run in 30 min
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          H=$(TZ=America/New_York date +%-H); D=$(TZ=America/New_York date +%u)
+          if [ "$D" -le 5 ] && [ "$H" -ge 3 ] && [ "$H" -lt 20 ]; then
+            WAIT=$(( 1800 - ( $(date +%s) - START ) ))
+            if [ "$WAIT" -gt 0 ]; then sleep "$WAIT"; fi
+            N=$(gh run list -R "${{ github.repository }}" -w watchlist.yml -L 20 --json status -q '[.[] | select(.status != "completed")] | length')
+            if [ "${N:-0}" -le 1 ]; then gh workflow run watchlist.yml -R "${{ github.repository }}" --ref main; fi
+          fi
