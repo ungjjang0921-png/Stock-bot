@@ -2660,9 +2660,20 @@ def main():
             info = {it["t"]: {"name": it["name"],
                               "risk": [t["name"] for t in it["tags"] if t["name"] in RISKY]
                               + (["희석 위험 높음"] if it["t"] in dil_hi else [])} for it in items}
-            PRED = predmod.run(PRICES, info, target_session(),
-                               OUT.parent / "pred_log.json", fx, check=distress_news, filings=FS_ALL)
-            log.info("예측 모델 %.0f초 · 기간 %s", time.time() - t_p, list((PRED or {}).get("horizons", {})))
+            # 예측은 '어제까지 일봉'만 쓰니 하루 한 번만 학습하고 나머지 실행은 재사용 (실행 시간 대폭 단축)
+            pc = cache_load("pred")
+            pk = str(target_session())
+            if pc.get("key") == pk and pc.get("out"):
+                PRED = pc["out"]
+                if fx:
+                    PRED["fx"] = fx
+                log.info("예측 모델: 오늘(%s) 학습 결과 재사용", pk)
+            else:
+                PRED = predmod.run(PRICES, info, target_session(),
+                                   OUT.parent / "pred_log.json", fx, check=distress_news, filings=FS_ALL)
+                pc.clear()
+                pc.update({"key": pk, "out": PRED})
+                log.info("예측 모델 %.0f초 · 기간 %s", time.time() - t_p, list((PRED or {}).get("horizons", {})))
             fa = (PRED or {}).get("fail") or {}
             ready = {h: v for h, v in fa.items() if v.get("ready")}
             if ready and (ANTHROPIC_KEY or GROQ_KEY):
@@ -2721,6 +2732,7 @@ def main():
     shutil.rmtree(OUT.parent / "r", ignore_errors=True)
     (OUT.parent / "r.html").unlink(missing_ok=True)
     write_page(items, surge, jbc)
+    save_caches()                                   # 오늘 학습한 예측 결과도 저장 (다음 실행 재사용)
     telegram(items, surge, jbc)
 
 
