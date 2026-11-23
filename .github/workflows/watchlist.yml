@@ -51,14 +51,15 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           git add docs 2>/dev/null || true
           git diff --cached --quiet || (git commit -m "update dashboard" && git pull --rebase -X theirs && git push)
-      # GitHub 예약 실행은 자주 건너뛰어서 → 미국 장 시간(프리·정규·애프터)엔 끝나고 30분 맞춰 스스로 다음 실행을 예약
+      # GitHub 예약 실행은 자주 건너뛰어서 → 평일엔 끝나고 30분 맞춰 스스로 다음 실행을 예약
       - name: next run in 30 min
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           H=$(TZ=America/New_York date +%-H); D=$(TZ=America/New_York date +%u)
-          if [ "$D" -le 5 ] && [ "$H" -ge 3 ] && [ "$H" -lt 20 ]; then
+          # 평일(미국 기준 월~금) 내내 이어서 돌림 — 한 번만 돌면 금요일 밤까지 30분마다 계속
+          if [ "$D" -le 5 ]; then
             WAIT=$(( 1800 - ( $(date +%s) - START ) ))
             if [ "$WAIT" -gt 0 ]; then sleep "$WAIT"; fi
             N=$(gh run list -R "${{ github.repository }}" -w watchlist.yml -L 20 --json status -q '[.[] | select(.status != "completed")] | length')
