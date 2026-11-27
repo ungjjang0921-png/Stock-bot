@@ -1655,6 +1655,23 @@ FEED: list = []
 DILUTION: list = []
 
 
+def _sess_info() -> dict:
+    """마지막 거래일 — 휴장일(추수감사절 등)·주말·장 열기 전엔 '오늘' 대신 그 날짜로 표시"""
+    try:
+        last = max(df.index[-1].date() for df in list(PRICES.values())[:80] if len(df))
+    except Exception:
+        return {}
+    now = datetime.now(ET)
+    old = last < now.date() and not (now.weekday() < 5 and now.time() >= dtime(4, 0) and now.date() not in _HOLI)
+    return {"sess_day": f"{last.month}/{last.day}", "sess_old": bool(last < now.date() and (old or now.date() in _HOLI))}
+
+
+_HOLI = {date(2026, 1, 1), date(2026, 1, 19), date(2026, 2, 16), date(2026, 4, 3), date(2026, 5, 25), date(2026, 6, 19),
+         date(2026, 7, 3), date(2026, 9, 7), date(2026, 11, 26), date(2026, 12, 25),
+         date(2027, 1, 1), date(2027, 1, 18), date(2027, 2, 15), date(2027, 3, 26), date(2027, 5, 31), date(2027, 6, 18),
+         date(2027, 7, 5), date(2027, 9, 6), date(2027, 11, 25), date(2027, 12, 24)}   # 미국 증시 휴장일
+
+
 def _cday() -> str:
     return datetime.now(ET).date().isoformat()
 
@@ -2567,6 +2584,7 @@ def write_page(items: list[dict], surge=None, jbc=None) -> None:
     payload = _clean({"updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M KST"), "items": items,
                       "forward": FORWARD_DAYS, "surge": surge or [], "jbc": jbc or [],
                       "cal": CALENDAR, "sq": SQUEEZE, "pred": PRED, "catch": CATCH, "tm": TM,
+                      **_sess_info(),
                       "rules": {"reg": int(SURGE_REG * 100), "pre": int(SURGE_PRE * 100), "jb": int(JB_HIT * 100)}})
     data = json.dumps(payload, ensure_ascii=False, default=lambda o: None).replace("</", "<\\/")
     OUT.parent.mkdir(parents=True, exist_ok=True)
